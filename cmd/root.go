@@ -41,5 +41,35 @@ func Execute() error {
 		}
 	}
 
+	// Register discovered plugins so they appear in help output.
+	registerPlugins()
+
 	return rootCmd.Execute()
+}
+
+func registerPlugins() {
+	plugins := plugin.Discover()
+	if len(plugins) == 0 {
+		return
+	}
+
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "builtin", Title: "Available Commands:"},
+		&cobra.Group{ID: "plugin", Title: "Plugins:"},
+	)
+	// Assign all existing (builtin) commands to the "builtin" group.
+	for _, cmd := range rootCmd.Commands() {
+		cmd.GroupID = "builtin"
+	}
+	for _, p := range plugins {
+		rootCmd.AddCommand(&cobra.Command{
+			Use:                p.Name,
+			Short:              p.Name + " plugin",
+			GroupID:            "plugin",
+			DisableFlagParsing: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return fmt.Errorf("plugin %q dispatch failed", cmd.Name())
+			},
+		})
+	}
 }
