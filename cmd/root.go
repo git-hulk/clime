@@ -37,6 +37,7 @@ func Execute() error {
 				fmt.Fprintf(os.Stderr, "failed to execute plugin: %s\n", p)
 				os.Exit(1)
 			}
+			return fmt.Errorf("unknown command %q for \"clime\"", sub)
 		}
 	}
 

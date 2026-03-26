@@ -6,38 +6,38 @@ import (
 	uicli "github.com/alperdrsnn/clime"
 )
 
-type cliTerminal struct{}
+type Terminal struct{}
 
-var terminal cliTerminal
+var terminal Terminal
 
-func (cliTerminal) Info(message string) {
+func (Terminal) Info(message string) {
 	uicli.InfoLine(message)
 }
 
-func (t cliTerminal) Infof(format string, args ...any) {
+func (t Terminal) Infof(format string, args ...any) {
 	t.Info(fmt.Sprintf(format, args...))
 }
 
-func (cliTerminal) Error(message string) {
+func (Terminal) Error(message string) {
 	uicli.ErrorLine(message)
 }
 
-func (t cliTerminal) Errorf(format string, args ...any) {
+func (t Terminal) Errorf(format string, args ...any) {
 	t.Error(fmt.Sprintf(format, args...))
 }
 
-func (cliTerminal) Success(message string) {
+func (Terminal) Success(message string) {
 	uicli.SuccessLine(message)
 }
 
-func (t cliTerminal) Successf(format string, args ...any) {
+func (t Terminal) Successf(format string, args ...any) {
 	t.Success(fmt.Sprintf(format, args...))
 }
 
-func (cliTerminal) Warning(message string) {
+func (Terminal) Warning(message string) {
 	uicli.WarningLine(message)
 }
 
-func (t cliTerminal) Warningf(format string, args ...any) {
+func (t Terminal) Warningf(format string, args ...any) {
 	t.Warning(fmt.Sprintf(format, args...))
 }

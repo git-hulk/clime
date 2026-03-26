@@ -14,11 +14,13 @@ var (
 )
 
 func main() {
+	var terminal cmd.Terminal
 	version.Version = ver
 	version.GitCommit = gitCommit
 	version.BuildDate = buildDate
 
 	if err := cmd.Execute(); err != nil {
+		terminal.Errorf("Error: %v", err)
 		os.Exit(1)
 	}
 }
