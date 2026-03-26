@@ -1,0 +1,14 @@
+# Default plugins to install via `clime plugin init`.
+# Each entry specifies a plugin name and optionally a repo or script source.
+# If repo is omitted, the default convention (git-hulk/clime-<name>) is used.
+#
+# Format:
+#   - name: <plugin-name>
+#     repo: <owner/repo>           # optional, GitHub repo
+#     script: <url>                # optional, install script URL
+#     binary_path: <path>          # required when using script
+
+plugins:
+#  - name: account
+#    script: https://{YOUR_INSTALL_SCRIPT_URL}/install.sh
+#    binary_path: ~/.local/bin/clime-account
