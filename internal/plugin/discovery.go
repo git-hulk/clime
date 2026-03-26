@@ -16,17 +16,17 @@ type Plugin struct {
 }
 
 // Find looks for a plugin binary matching the given name.
-// It searches $PATH and ~/.clime/bin/ for an executable named clime-<name>.
+// It searches ~/.clime/plugins/ and $PATH for an executable named clime-<name>.
 func Find(name string) (string, bool) {
 	binName := binPrefix + name
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
 
-	// Check ~/.clime/bin/ first (managed plugins take priority)
+	// Check ~/.clime/plugins/ first (managed plugins take priority)
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		managed := filepath.Join(homeDir, ".clime", "bin", binName)
+		managed := filepath.Join(homeDir, ".clime", "plugins", binName)
 		if isExecutable(managed) {
 			return managed, true
 		}
@@ -44,15 +44,15 @@ func Find(name string) (string, bool) {
 	return "", false
 }
 
-// Discover returns all plugins found on $PATH and ~/.clime/bin/.
+// Discover returns all plugins found in ~/.clime/plugins/ and $PATH.
 func Discover() []Plugin {
 	seen := make(map[string]bool)
 	var plugins []Plugin
 
-	// Check ~/.clime/bin/ first
+	// Check ~/.clime/plugins/ first
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		managedDir := filepath.Join(homeDir, ".clime", "bin")
+		managedDir := filepath.Join(homeDir, ".clime", "plugins")
 		plugins = append(plugins, scanDir(managedDir, seen)...)
 	}
 

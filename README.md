@@ -57,9 +57,9 @@ Plugin update resolves the source repo via: `--repo` flag > manifest entry > def
 ## Plugin Discovery
 
 - Binaries follow the `clime-<name>` naming convention
-- Lookup order: `~/.clime/bin` (managed), then `PATH`
+- Lookup order: `~/.clime/plugins` (managed), then `PATH`
 - Metadata stored in `~/.clime/plugins.yaml`
-- npm plugins are auto-symlinked into `~/.clime/bin/`
+- npm plugins are auto-symlinked into `~/.clime/plugins/`
 
 ## `clime init`
 

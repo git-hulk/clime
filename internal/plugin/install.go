@@ -92,7 +92,7 @@ func InstallFromScript(name, scriptURL, binaryPath string) error {
 		return fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
 	}
 
-	// Create symlink: ~/.clime/bin/clime-<name> -> binaryPath
+	// Create symlink: ~/.clime/plugins/clime-<name> -> binaryPath
 	installDir, err := pluginBinDir()
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func InstallFromNpm(name, npmPackage string) error {
 		}
 	}
 
-	// Create symlink: ~/.clime/bin/clime-<name> -> binaryPath
+	// Create symlink: ~/.clime/plugins/clime-<name> -> binaryPath
 	installDir, err := pluginBinDir()
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func pluginBinDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".clime", "bin"), nil
+	return filepath.Join(home, ".clime", "plugins"), nil
 }
 
 func findAsset(release *githubrelease.Release, name string) (*githubrelease.Asset, error) {

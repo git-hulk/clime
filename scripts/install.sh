@@ -40,7 +40,11 @@ fi
 
 # Default install directory
 if [ -z "$INSTALL_DIR" ]; then
-    INSTALL_DIR="${HOME}/.clime/bin"
+    if [ -n "$PLUGIN" ]; then
+        INSTALL_DIR="${HOME}/.clime/plugins"
+    else
+        INSTALL_DIR="${HOME}/.clime/bin"
+    fi
 fi
 
 # Detect OS
@@ -122,31 +126,33 @@ chmod +x "${INSTALL_DIR}/${BINARY}"
 
 echo "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
 
-# Add to PATH if needed
-case ":${PATH}:" in
-    *":${INSTALL_DIR}:"*)
-        ;;
-    *)
-        SHELL_RC=""
-        case "${SHELL:-}" in
-            */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-            */bash) SHELL_RC="$HOME/.bashrc" ;;
-        esac
-        if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
-            if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-                echo "" >> "$SHELL_RC"
-                echo "# clime" >> "$SHELL_RC"
-                echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$SHELL_RC"
-                echo "Added ${INSTALL_DIR} to PATH in ${SHELL_RC}"
-                echo "Run 'source ${SHELL_RC}' or restart your shell to use it."
+# Add to PATH if needed (only for the main CLI, not plugins)
+if [ -z "$PLUGIN" ]; then
+    case ":${PATH}:" in
+        *":${INSTALL_DIR}:"*)
+            ;;
+        *)
+            SHELL_RC=""
+            case "${SHELL:-}" in
+                */zsh)  SHELL_RC="$HOME/.zshrc" ;;
+                */bash) SHELL_RC="$HOME/.bashrc" ;;
+            esac
+            if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
+                if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+                    echo "" >> "$SHELL_RC"
+                    echo "# clime" >> "$SHELL_RC"
+                    echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$SHELL_RC"
+                    echo "Added ${INSTALL_DIR} to PATH in ${SHELL_RC}"
+                    echo "Run 'source ${SHELL_RC}' or restart your shell to use it."
+                fi
+            else
+                echo ""
+                echo "Add the following to your shell profile:"
+                echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
             fi
-        else
-            echo ""
-            echo "Add the following to your shell profile:"
-            echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-        fi
-        ;;
-esac
+            ;;
+    esac
+fi
 
 # Run init to install default plugins (only for the main CLI, not plugin installs)
 if [ -z "$PLUGIN" ]; then
