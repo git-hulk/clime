@@ -8,16 +8,6 @@ A unified CLI that dispatches to plugin binaries (`clime-<name>`) on your `PATH`
 curl -sSfL https://raw.githubusercontent.com/git-hulk/clime/master/scripts/install.sh | sh
 ```
 
-Options:
-
-```sh
-# Custom install directory
-curl -sSfL https://raw.githubusercontent.com/git-hulk/clime/master/scripts/install.sh | sh -s -- --dir /usr/local/bin
-
-# Install a plugin directly
-curl -sSfL https://raw.githubusercontent.com/git-hulk/clime/master/scripts/install.sh | sh -s -- --plugin hr
-```
-
 Or build from source (requires Go 1.25+):
 
 ```sh
