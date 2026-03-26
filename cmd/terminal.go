@@ -11,7 +11,7 @@ type Terminal struct{}
 var terminal Terminal
 
 func (Terminal) Info(message string) {
-	uicli.InfoLine(message)
+	fmt.Println(uicli.DimColor.Sprint("ℹ " + message))
 }
 
 func (t Terminal) Infof(format string, args ...any) {
