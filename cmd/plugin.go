@@ -33,6 +33,7 @@ func init() {
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
 	Short: "Manage clime plugins",
+	RunE:  pluginListCmd.RunE,
 }
 
 var pluginListCmd = &cobra.Command{

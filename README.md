@@ -34,13 +34,13 @@ clime update                                     # self-update clime
 
 | Command | Description |
 |---------|-------------|
-| `clime version` | Print version, commit, and build date |
-| `clime update [--repo owner/name] [--force]` | Self-update the `clime` binary |
-| `clime plugin list` | List discovered plugins |
-| `clime plugin install <name> [--repo] [--npm]` | Install a plugin |
-| `clime plugin update <name\|*\|all> [--repo] [--force]` | Update plugin(s) |
-| `clime plugin remove <name>` | Remove a plugin |
-| `clime init [url]` | Install default plugin set |
+| clime version | Print version, commit, and build date |
+| clime update [--repo owner/name] [--force] | Self-update the `clime` binary |
+| clime plugin list | List discovered plugins |
+| clime plugin install <name> [--repo] [--npm] | Install a plugin |
+| clime plugin update <name\|*\|all> [--repo] [--force] | Update plugin(s) |
+| clime plugin remove <name> | Remove a plugin |
+| clime init [url] | Install default plugin set |
 
 Plugin update resolves the source repo via: `--repo` flag > manifest entry > default `git-hulk/clime-<name>`.
 
@@ -51,7 +51,7 @@ Plugin update resolves the source repo via: `--repo` flag > manifest entry > def
 - Metadata stored in `~/.clime/plugins.yaml`
 - npm plugins are auto-symlinked into `~/.clime/plugins/`
 
-## `clime init`
+## Clime Init
 
 Installs a default set of plugins in one command. Pass a URL to use a remote plugin list maintained by your organization:
 
@@ -74,10 +74,8 @@ plugins:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Plugin subcommand name (`hr` -> `clime hr`) |
-| `repo` | no | GitHub `owner/repo`; defaults to `git-hulk/clime-<name>` |
-| `script` | no | Install script URL (`curl \| sh`) |
-| `binary_path` | no | Binary location (required with `script`) |
-| `npm` | no | npm package to install globally |
-
-```
+| name | yes | Plugin subcommand name (`hr` -> `clime hr`) |
+| repo | no | GitHub `owner/repo`; defaults to `git-hulk/clime-<name>` |
+| script | no | Install script URL (`curl \| sh`) |
+| binary_path | no | Binary location (required with `script`) |
+| npm | no | npm package to install globally |
