@@ -64,7 +64,11 @@ Otherwise, the built-in default plugin list is used.`,
 		)
 
 		for _, p := range plugins {
-			terminal.Infof("Installing %q...", p.Name)
+			spinner := uicli.NewSpinner().
+				WithStyle(uicli.SpinnerDots).
+				WithColor(uicli.CyanColor).
+				WithMessage(fmt.Sprintf("Installing %q...", p.Name)).
+				Start()
 
 			var (
 				installErr error
@@ -86,11 +90,12 @@ Otherwise, the built-in default plugin list is used.`,
 			}
 
 			if installErr != nil {
-				terminal.Errorf("FAILED: %v", installErr)
+				spinner.Error(fmt.Sprintf("Failed to install %q", p.Name))
 				failed = append(failed, p.Name)
 				rows = append(rows, installRow{name: p.Name, source: source, status: "Failed"})
 				continue
 			}
+			spinner.Success(fmt.Sprintf("Installed %q", p.Name))
 			rows = append(rows, installRow{name: p.Name, source: source, status: "Installed"})
 		}
 
@@ -101,16 +106,28 @@ Otherwise, the built-in default plugin list is used.`,
 			AddColumn("STATUS").
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
-			SetColumnColor(1, uicli.CyanColor)
+			WithStyle(uicli.TableStyleRounded).
+			SetColumnColor(0, uicli.BrightCyanColor).
+			SetColumnColor(1, uicli.DimColor)
 		for _, r := range rows {
-			table.AddRow(r.name, r.source, r.status)
+			coloredStatus := r.status
+			switch r.status {
+			case "Installed":
+				coloredStatus = uicli.GreenColor.Sprint(r.status)
+			case "Failed":
+				coloredStatus = uicli.RedColor.Sprint(r.status)
+			}
+			table.AddRow(r.name, r.source, coloredStatus)
 		}
 		table.Println()
 
-		fmt.Println()
 		if len(failed) > 0 {
+			fmt.Println()
 			return fmt.Errorf("%d plugin(s) failed to install: %v", len(failed), failed)
 		}
+
+		fmt.Println()
+		terminal.Successf("All %d plugins installed!", len(plugins))
 		return nil
 	},
 }
