@@ -35,7 +35,7 @@ Install a plugin, then use it as a subcommand — clime forwards all arguments t
 clime plugin install account --script https://example.com/install.sh --binary-path ~/.local/bin/clime-account
 
 # Install a plugin from npm
-clime plugin install opencli --npm jackwener/opencli
+clime plugin install opencli --npm @jackwener/opencli
 
 # Now use it — clime dispatches to the clime-<name> binary
 clime account login --user hulk
