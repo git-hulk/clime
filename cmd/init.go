@@ -65,6 +65,7 @@ Otherwise, the built-in default plugin list is used.`,
 		type installRow struct {
 			name   string
 			source string
+			tags   string
 			status string
 		}
 
@@ -102,23 +103,25 @@ Otherwise, the built-in default plugin list is used.`,
 			if installErr != nil {
 				spinner.Error(fmt.Sprintf("Failed to install %q", p.Name))
 				failed = append(failed, p.Name)
-				rows = append(rows, installRow{name: p.Name, source: source, status: "Failed"})
+				rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Failed"})
 				continue
 			}
 			spinner.Success(fmt.Sprintf("Installed %q", p.Name))
-			rows = append(rows, installRow{name: p.Name, source: source, status: "Installed"})
+			rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Installed"})
 		}
 
 		fmt.Println()
 		table := uicli.NewTable().
 			AddColumn("NAME").
 			AddColumn("SOURCE").
+			AddColumn("TAGS").
 			AddColumn("STATUS").
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
 			WithStyle(uicli.TableStyleRounded).
 			SetColumnColor(0, uicli.BrightCyanColor).
-			SetColumnColor(1, uicli.DimColor)
+			SetColumnColor(1, uicli.DimColor).
+			SetColumnColor(2, uicli.DimColor)
 		for _, r := range rows {
 			coloredStatus := r.status
 			switch r.status {
@@ -127,7 +130,7 @@ Otherwise, the built-in default plugin list is used.`,
 			case "Failed":
 				coloredStatus = uicli.RedColor.Sprint(r.status)
 			}
-			table.AddRow(r.name, r.source, coloredStatus)
+			table.AddRow(r.name, r.source, r.tags, coloredStatus)
 		}
 		table.Println()
 
