@@ -105,8 +105,8 @@ Otherwise, the built-in default plugin list is used.`,
 			}
 
 			if installErr != nil {
-				spinner.Error(fmt.Sprintf("Failed to install %q", p.Name))
-				failed = append(failed, p.Name)
+				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, installErr))
+				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, installErr))
 				rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Failed"})
 				continue
 			}
@@ -147,7 +147,7 @@ Otherwise, the built-in default plugin list is used.`,
 
 		if len(failed) > 0 {
 			fmt.Println()
-			return fmt.Errorf("%d plugin(s) failed to install: %v", len(failed), failed)
+			return fmt.Errorf("%d plugin(s) failed to install", len(failed))
 		}
 
 		fmt.Println()
