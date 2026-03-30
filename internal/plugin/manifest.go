@@ -13,6 +13,7 @@ type ManifestEntry struct {
 	Name        string    `yaml:"name"`
 	Version     string    `yaml:"version"`
 	Repo        string    `yaml:"repo"`
+	BinaryPath  string    `yaml:"binary_path,omitempty"`
 	InstalledAt time.Time `yaml:"installed_at"`
 }
 
@@ -67,11 +68,12 @@ func (m *Manifest) Save() error {
 }
 
 // Add adds or updates a plugin entry in the manifest.
-func (m *Manifest) Add(name, version, repo string) {
+func (m *Manifest) Add(name, version, repo, binaryPath string) {
 	for i, p := range m.Plugins {
 		if p.Name == name {
 			m.Plugins[i].Version = version
 			m.Plugins[i].Repo = repo
+			m.Plugins[i].BinaryPath = binaryPath
 			m.Plugins[i].InstalledAt = time.Now()
 			return
 		}
@@ -80,6 +82,7 @@ func (m *Manifest) Add(name, version, repo string) {
 		Name:        name,
 		Version:     version,
 		Repo:        repo,
+		BinaryPath:  binaryPath,
 		InstalledAt: time.Now(),
 	})
 }

@@ -59,7 +59,7 @@ func InstallFromRepo(name, repo string) (string, error) {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, version, repo)
+	manifest.Add(name, version, repo, "")
 	if err := manifest.Save(); err != nil {
 		return "", fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -67,8 +67,9 @@ func InstallFromRepo(name, repo string) (string, error) {
 	return version, nil
 }
 
-// InstallFromScript runs a remote install script (curl | sh) and creates a
-// symlink so the installed binary is discoverable as clime-<name>.
+// InstallFromScript runs a remote install script (curl | sh) and optionally
+// creates a symlink so the installed binary is discoverable as clime-<name>.
+// If binaryPath is empty, only the script is executed and no symlink is created.
 func InstallFromScript(name, scriptURL, binaryPath string) error {
 	// Run the install script
 	cmd := osexec.Command("bash", "-c", fmt.Sprintf("curl -fsSL '%s' | bash", scriptURL))
@@ -78,34 +79,36 @@ func InstallFromScript(name, scriptURL, binaryPath string) error {
 		return fmt.Errorf("install script failed: %w", err)
 	}
 
-	// Resolve the actual binary path (expand ~)
-	if strings.HasPrefix(binaryPath, "~/") {
-		home, err := os.UserHomeDir()
+	if binaryPath != "" {
+		// Resolve the actual binary path (expand ~)
+		if strings.HasPrefix(binaryPath, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			binaryPath = filepath.Join(home, binaryPath[2:])
+		}
+
+		// Verify the binary exists
+		if _, err := os.Stat(binaryPath); err != nil {
+			return fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
+		}
+
+		// Create symlink: ~/.clime/plugins/clime-<name> -> binaryPath
+		installDir, err := pluginBinDir()
 		if err != nil {
 			return err
 		}
-		binaryPath = filepath.Join(home, binaryPath[2:])
-	}
+		if err := os.MkdirAll(installDir, 0755); err != nil {
+			return err
+		}
 
-	// Verify the binary exists
-	if _, err := os.Stat(binaryPath); err != nil {
-		return fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
-	}
-
-	// Create symlink: ~/.clime/plugins/clime-<name> -> binaryPath
-	installDir, err := pluginBinDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(installDir, 0755); err != nil {
-		return err
-	}
-
-	linkPath := filepath.Join(installDir, binPrefix+name)
-	// Remove existing symlink if any
-	os.Remove(linkPath)
-	if err := os.Symlink(binaryPath, linkPath); err != nil {
-		return fmt.Errorf("failed to create symlink: %w", err)
+		linkPath := filepath.Join(installDir, binPrefix+name)
+		// Remove existing symlink if any
+		os.Remove(linkPath)
+		if err := os.Symlink(binaryPath, linkPath); err != nil {
+			return fmt.Errorf("failed to create symlink: %w", err)
+		}
 	}
 
 	// Update manifest
@@ -113,7 +116,7 @@ func InstallFromScript(name, scriptURL, binaryPath string) error {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", scriptURL)
+	manifest.Add(name, "latest", scriptURL, binaryPath)
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -174,7 +177,7 @@ func InstallFromNpm(name, npmPackage string) error {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", npmSourcePrefix+npmPackage)
+	manifest.Add(name, "latest", npmSourcePrefix+npmPackage, "")
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}

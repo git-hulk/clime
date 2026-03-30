@@ -128,7 +128,7 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
 
-	manifest.Add(name, latest, repo)
+	manifest.Add(name, latest, repo, "")
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -161,7 +161,7 @@ func (u *Updater) updateFromScript(manifest *Manifest, name string, entry Manife
 		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", scriptURL, err)
 	}
 
-	manifest.Add(name, "latest", scriptURL)
+	manifest.Add(name, "latest", scriptURL, entry.BinaryPath)
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -199,7 +199,7 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 		return nil, fmt.Errorf("failed to update npm plugin %q: %w", pkg, err)
 	}
 
-	manifest.Add(name, "latest", source)
+	manifest.Add(name, "latest", source, "")
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}

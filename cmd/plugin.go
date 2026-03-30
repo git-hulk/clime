@@ -12,6 +12,8 @@ import (
 
 var pluginRepo string
 var pluginNpm string
+var pluginScript string
+var pluginBinaryPath string
 var (
 	pluginUpdateRepo  string
 	pluginUpdateForce bool
@@ -20,6 +22,8 @@ var (
 func init() {
 	pluginInstallCmd.Flags().StringVar(&pluginRepo, "repo", "", "GitHub repo (owner/name) to install from, overrides the default convention")
 	pluginInstallCmd.Flags().StringVar(&pluginNpm, "npm", "", "npm package name to install globally")
+	pluginInstallCmd.Flags().StringVar(&pluginScript, "script", "", "URL of an install script to run (curl | sh)")
+	pluginInstallCmd.Flags().StringVar(&pluginBinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
 	pluginUpdateCmd.Flags().StringVar(&pluginUpdateRepo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
 	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateForce, "force", false, "Update even if current version matches latest release")
 
@@ -77,14 +81,24 @@ var pluginListCmd = &cobra.Command{
 
 var pluginInstallCmd = &cobra.Command{
 	Use:   "install <name>",
-	Short: "Install a plugin from GitHub Releases or npm",
-	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package instead.",
+	Short: "Install a plugin from GitHub Releases, npm, or an install script",
+	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package, or --script to run a remote install script.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		if pluginNpm != "" && pluginRepo != "" {
-			return fmt.Errorf("--npm and --repo are mutually exclusive")
+		sources := 0
+		if pluginNpm != "" {
+			sources++
+		}
+		if pluginRepo != "" {
+			sources++
+		}
+		if pluginScript != "" {
+			sources++
+		}
+		if sources > 1 {
+			return fmt.Errorf("--npm, --repo, and --script are mutually exclusive")
 		}
 
 		spinner := uicli.NewSpinner().
@@ -92,6 +106,15 @@ var pluginInstallCmd = &cobra.Command{
 			WithColor(uicli.CyanColor).
 			WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
 			Start()
+
+		if pluginScript != "" {
+			if err := plugin.InstallFromScript(name, pluginScript, pluginBinaryPath); err != nil {
+				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
+				return fmt.Errorf("failed to install plugin %q: %w", name, err)
+			}
+			spinner.Success(fmt.Sprintf("Installed plugin %q via install script", name))
+			return nil
+		}
 
 		if pluginNpm != "" {
 			if err := plugin.InstallFromNpm(name, pluginNpm); err != nil {
