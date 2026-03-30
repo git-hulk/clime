@@ -58,11 +58,18 @@ var pluginListCmd = &cobra.Command{
 			return nil
 		}
 
+		const (
+			maxNameWidth = 20
+			maxDescWidth = 40
+			maxPathWidth = 30
+		)
+
 		table := uicli.NewTable().
-			AddColumn("NAME").
-			AddColumn("DESCRIPTION").
-			AddColumn("VERSION").
-			AddColumn("PATH").
+			AutoResize(false).
+			AddColumnWithWidth("NAME", maxNameWidth).
+			AddColumnWithWidth("DESCRIPTION", maxDescWidth).
+			AddColumnWithWidth("VERSION", 12).
+			AddColumnWithWidth("PATH", maxPathWidth).
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
 			WithStyle(uicli.TableStyleRounded).
@@ -76,7 +83,12 @@ var pluginListCmd = &cobra.Command{
 			if entry, ok := manifest.Get(p.Name); ok {
 				version = entry.Version
 			}
-			table.AddRow(p.Name, p.Description, version, p.Path)
+			table.AddRow(
+				uicli.TruncateString(p.Name, maxNameWidth),
+				uicli.TruncateString(p.Description, maxDescWidth),
+				version,
+				uicli.TruncateString(p.Path, maxPathWidth),
+			)
 		}
 		table.Println()
 		return nil
