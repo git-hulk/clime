@@ -71,12 +71,10 @@ func InstallFromRepo(name, repo string) (string, error) {
 // creates a symlink so the installed binary is discoverable as clime-<name>.
 // If binaryPath is empty, only the script is executed and no symlink is created.
 func InstallFromScript(name, scriptURL, binaryPath string) error {
-	// Run the install script
+	// Run the install script (capture output to avoid interleaving with spinner)
 	cmd := osexec.Command("bash", "-c", fmt.Sprintf("curl -fsSL '%s' | bash", scriptURL))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("install script failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("install script failed: %w\n%s", err, string(output))
 	}
 
 	if binaryPath != "" {
@@ -132,12 +130,10 @@ func InstallFromNpm(name, npmPackage string) error {
 		return fmt.Errorf("npm is not installed or not on PATH: %w", err)
 	}
 
-	// Run npm install -g
+	// Run npm install -g (capture output to avoid interleaving with spinner)
 	cmd := osexec.Command("npm", "install", "-g", npmPackage)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("npm install failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("npm install failed: %w\n%s", err, string(output))
 	}
 
 	// Discover the installed binary path
@@ -206,10 +202,8 @@ func Uninstall(name string) error {
 	if entry, ok := manifest.Get(name); ok && isNpmSource(entry.Repo) {
 		pkg := npmPackageName(entry.Repo)
 		cmd := osexec.Command("npm", "uninstall", "-g", pkg)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: npm uninstall -g %s failed: %v\n", pkg, err)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: npm uninstall -g %s failed: %v\n%s", pkg, err, string(output))
 		}
 	}
 

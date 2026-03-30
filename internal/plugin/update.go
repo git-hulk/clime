@@ -144,10 +144,8 @@ func writePluginBinary(destPath string, binaryContent []byte) error {
 
 func runInstallScript(scriptURL string) error {
 	cmd := osexec.Command("bash", "-c", fmt.Sprintf("curl -fsSL '%s' | bash", scriptURL))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("install script failed: %w", err)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("install script failed: %w\n%s", err, string(output))
 	}
 	return nil
 }
@@ -184,9 +182,10 @@ func (u *Updater) updateFromScript(manifest *Manifest, name string, entry Manife
 
 func runNpmGlobalUpdate(pkg string) error {
 	cmd := osexec.Command("npm", "update", "-g", pkg)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("npm update failed: %w\n%s", err, string(output))
+	}
+	return nil
 }
 
 func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestEntry, source string) (*UpdateResult, error) {
