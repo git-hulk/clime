@@ -2,13 +2,21 @@
 # Each entry specifies a plugin name and optionally a repo or script source.
 # If repo is omitted, the default convention (git-hulk/clime-<name>) is used.
 #
+# Plugins with no tags are installed by default.
+# Plugins with tags are only installed when matching tags are specified
+# via `clime init --tags <tag1>,<tag2>`.
+#
 # Format:
 #   - name: <plugin-name>
 #     repo: <owner/repo>           # optional, GitHub repo
 #     script: <url>                # optional, install script URL
 #     binary_path: <path>          # required when using script
+#     tags: [devops, email-parser] # optional, tag-based filtering
 
 plugins:
 #  - name: account
 #    script: https://{YOUR_INSTALL_SCRIPT_URL}/install.sh
 #    binary_path: ~/.local/bin/clime-account
+#  - name: email-tools
+#    repo: git-hulk/clime-email-tools
+#    tags: [devops, email-parser]

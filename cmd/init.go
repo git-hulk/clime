@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
@@ -21,12 +22,19 @@ type defaultPlugin struct {
 
 	// For npm-based plugins:
 	NpmPackage string // npm package name (e.g. "@myorg/clime-deploy")
+
+	// Tags for selective installation (empty = always install).
+	Tags []string
 }
 
 // defaultPlugins is the list of plugins installed by `clime init`.
 var defaultPlugins = []defaultPlugin{}
 
+var initTags []string
+
 func init() {
+	initCmd.Flags().StringSliceVar(&initTags, "tags", nil,
+		"Only install plugins matching these tags (comma-separated); untagged plugins are always installed")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -43,6 +51,8 @@ Otherwise, the built-in default plugin list is used.`,
 		if err != nil {
 			return err
 		}
+
+		plugins = filterPluginsByTags(plugins, initTags)
 
 		if len(plugins) == 0 {
 			terminal.Warning("No default plugins configured.")
@@ -155,7 +165,44 @@ func resolvePlugins(args []string) ([]defaultPlugin, error) {
 			ScriptURL:  p.Script,
 			BinaryPath: p.BinaryPath,
 			NpmPackage: p.Npm,
+			Tags:       p.Tags,
 		})
 	}
 	return plugins, nil
+}
+
+// filterPluginsByTags returns plugins that should be installed based on the
+// given tags. If tags is empty, all plugins are returned. Otherwise, untagged
+// plugins are always included, and tagged plugins are included only if they
+// share at least one tag with the provided list.
+func filterPluginsByTags(plugins []defaultPlugin, tags []string) []defaultPlugin {
+	if len(tags) == 0 {
+		return plugins
+	}
+
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tagSet[t] = true
+		}
+	}
+	if len(tagSet) == 0 {
+		return plugins
+	}
+
+	filtered := make([]defaultPlugin, 0, len(plugins))
+	for _, p := range plugins {
+		if len(p.Tags) == 0 {
+			filtered = append(filtered, p)
+			continue
+		}
+		for _, pt := range p.Tags {
+			if tagSet[strings.TrimSpace(pt)] {
+				filtered = append(filtered, p)
+				break
+			}
+		}
+	}
+	return filtered
 }

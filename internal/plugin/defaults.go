@@ -14,7 +14,8 @@ type DefaultPlugin struct {
 	Repo       string `yaml:"repo,omitempty"`
 	Script     string `yaml:"script,omitempty"`
 	BinaryPath string `yaml:"binary_path,omitempty"`
-	Npm        string `yaml:"npm,omitempty"`
+	Npm        string   `yaml:"npm,omitempty"`
+	Tags       []string `yaml:"tags,omitempty"`
 }
 
 // DefaultPlugins is the top-level structure of the remote defaults YAML.
