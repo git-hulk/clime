@@ -11,8 +11,9 @@ const binPrefix = "clime-"
 
 // Plugin represents a discovered plugin binary.
 type Plugin struct {
-	Name string // e.g. "hr" (derived from clime-hr)
-	Path string // absolute path to the binary
+	Name        string // e.g. "hr" (derived from clime-hr)
+	Path        string // absolute path to the binary
+	Description string // optional short description for help output
 }
 
 // Find looks for a plugin binary matching the given name.
@@ -45,6 +46,7 @@ func Find(name string) (string, bool) {
 }
 
 // Discover returns all plugins found in ~/.clime/plugins/ and $PATH.
+// Descriptions are populated from the plugin manifest when available.
 func Discover() []Plugin {
 	seen := make(map[string]bool)
 	var plugins []Plugin
@@ -60,6 +62,16 @@ func Discover() []Plugin {
 	pathEnv := os.Getenv("PATH")
 	for _, dir := range strings.Split(pathEnv, string(os.PathListSeparator)) {
 		plugins = append(plugins, scanDir(dir, seen)...)
+	}
+
+	// Populate descriptions from the manifest
+	manifest, err := LoadManifest()
+	if err == nil {
+		for i, p := range plugins {
+			if entry, ok := manifest.Get(p.Name); ok && entry.Description != "" {
+				plugins[i].Description = entry.Description
+			}
+		}
 	}
 
 	return plugins

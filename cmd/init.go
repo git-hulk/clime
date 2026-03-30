@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"net/url"
+
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
 	"github.com/spf13/cobra"
@@ -11,7 +13,8 @@ import (
 
 // defaultPlugin defines a plugin to install during `clime init`.
 type defaultPlugin struct {
-	Name string // subcommand name (e.g. "account")
+	Name        string // subcommand name (e.g. "account")
+	Description string // short description shown in help output
 
 	// For GitHub Releases-based plugins (leave empty to use script-based install):
 	Repo string // GitHub repo (e.g. "git-hulk/clime-hr")
@@ -39,11 +42,12 @@ func init() {
 }
 
 var initCmd = &cobra.Command{
-	Use:   "init [url]",
+	Use:   "init [url|path]",
 	Short: "Install default plugins",
 	Long: `Downloads and installs the organization's default set of plugins.
 
 If a URL is provided, the plugin list is fetched from that remote YAML file.
+If a local file path is provided, the plugin list is loaded from that YAML file.
 Otherwise, the built-in default plugin list is used.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -106,6 +110,12 @@ Otherwise, the built-in default plugin list is used.`,
 				rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Failed"})
 				continue
 			}
+			if p.Description != "" {
+				if m, err := plugin.LoadManifest(); err == nil {
+					m.SetDescription(p.Name, p.Description)
+					_ = m.Save()
+				}
+			}
 			spinner.Success(fmt.Sprintf("Installed %q", p.Name))
 			rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Installed"})
 		}
@@ -145,30 +155,51 @@ Otherwise, the built-in default plugin list is used.`,
 	},
 }
 
+// isURL returns true if the given string looks like an HTTP(S) URL.
+func isURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
+}
+
 // resolvePlugins returns the plugin list to install. If a URL argument is
-// provided, the list is fetched from that remote YAML file; otherwise the
-// built-in defaultPlugins slice is returned.
+// provided, the list is fetched from that remote YAML file. If a local file
+// path is provided, the list is loaded from that file. Otherwise the built-in
+// defaultPlugins slice is returned.
 func resolvePlugins(args []string) ([]defaultPlugin, error) {
 	if len(args) == 0 {
 		return defaultPlugins, nil
 	}
 
-	url := args[0]
-	terminal.Infof("Fetching plugin list from %s...", url)
-	defaults, err := plugin.FetchDefaultPlugins(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch plugin list: %w", err)
+	source := args[0]
+	var (
+		defaults *plugin.DefaultPlugins
+		err      error
+	)
+
+	if isURL(source) {
+		terminal.Infof("Fetching plugin list from %s...", source)
+		defaults, err = plugin.FetchDefaultPlugins(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch plugin list: %w", err)
+		}
+	} else {
+		terminal.Infof("Loading plugin list from %s...", source)
+		defaults, err = plugin.LoadDefaultPluginsFromFile(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load plugin list: %w", err)
+		}
 	}
 
 	plugins := make([]defaultPlugin, 0, len(defaults.Plugins))
 	for _, p := range defaults.Plugins {
 		plugins = append(plugins, defaultPlugin{
-			Name:       p.Name,
-			Repo:       p.Repo,
-			ScriptURL:  p.Script,
-			BinaryPath: p.BinaryPath,
-			NpmPackage: p.Npm,
-			Tags:       p.Tags,
+			Name:        p.Name,
+			Description: p.Description,
+			Repo:        p.Repo,
+			ScriptURL:   p.Script,
+			BinaryPath:  p.BinaryPath,
+			NpmPackage:  p.Npm,
+			Tags:        p.Tags,
 		})
 	}
 	return plugins, nil

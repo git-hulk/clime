@@ -11,6 +11,7 @@ import (
 // ManifestEntry represents a plugin installed via `clime plugin install`.
 type ManifestEntry struct {
 	Name        string    `yaml:"name"`
+	Description string    `yaml:"description,omitempty"`
 	Version     string    `yaml:"version"`
 	Repo        string    `yaml:"repo"`
 	BinaryPath  string    `yaml:"binary_path,omitempty"`
@@ -85,6 +86,16 @@ func (m *Manifest) Add(name, version, repo, binaryPath string) {
 		BinaryPath:  binaryPath,
 		InstalledAt: time.Now(),
 	})
+}
+
+// SetDescription sets the description for a plugin entry in the manifest.
+func (m *Manifest) SetDescription(name, description string) {
+	for i, p := range m.Plugins {
+		if p.Name == name {
+			m.Plugins[i].Description = description
+			return
+		}
+	}
 }
 
 // Remove removes a plugin entry from the manifest.

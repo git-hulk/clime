@@ -62,9 +62,13 @@ func registerPlugins() {
 		cmd.GroupID = "builtin"
 	}
 	for _, p := range plugins {
+		short := p.Name + " plugin"
+		if p.Description != "" {
+			short = p.Description
+		}
 		rootCmd.AddCommand(&cobra.Command{
 			Use:                p.Name,
-			Short:              p.Name + " plugin",
+			Short:              short,
 			GroupID:            "plugin",
 			DisableFlagParsing: true,
 			RunE: func(cmd *cobra.Command, args []string) error {

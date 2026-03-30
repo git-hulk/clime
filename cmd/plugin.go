@@ -14,6 +14,7 @@ var pluginRepo string
 var pluginNpm string
 var pluginScript string
 var pluginBinaryPath string
+var pluginDescription string
 var (
 	pluginUpdateRepo  string
 	pluginUpdateForce bool
@@ -24,6 +25,7 @@ func init() {
 	pluginInstallCmd.Flags().StringVar(&pluginNpm, "npm", "", "npm package name to install globally")
 	pluginInstallCmd.Flags().StringVar(&pluginScript, "script", "", "URL of an install script to run (curl | sh)")
 	pluginInstallCmd.Flags().StringVar(&pluginBinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
+	pluginInstallCmd.Flags().StringVar(&pluginDescription, "description", "", "short description shown in help output")
 	pluginUpdateCmd.Flags().StringVar(&pluginUpdateRepo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
 	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateForce, "force", false, "Update even if current version matches latest release")
 
@@ -58,21 +60,23 @@ var pluginListCmd = &cobra.Command{
 
 		table := uicli.NewTable().
 			AddColumn("NAME").
+			AddColumn("DESCRIPTION").
 			AddColumn("VERSION").
 			AddColumn("PATH").
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
 			WithStyle(uicli.TableStyleRounded).
 			SetColumnColor(0, uicli.BrightCyanColor).
-			SetColumnColor(1, uicli.GreenColor).
-			SetColumnColor(2, uicli.DimColor)
+			SetColumnColor(1, uicli.DimColor).
+			SetColumnColor(2, uicli.GreenColor).
+			SetColumnColor(3, uicli.DimColor)
 
 		for _, p := range discovered {
 			version := ""
 			if entry, ok := manifest.Get(p.Name); ok {
 				version = entry.Version
 			}
-			table.AddRow(p.Name, version, p.Path)
+			table.AddRow(p.Name, p.Description, version, p.Path)
 		}
 		table.Println()
 		return nil
@@ -112,6 +116,7 @@ var pluginInstallCmd = &cobra.Command{
 				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 				return fmt.Errorf("failed to install plugin %q: %w", name, err)
 			}
+			savePluginDescription(name, pluginDescription)
 			spinner.Success(fmt.Sprintf("Installed plugin %q via install script", name))
 			return nil
 		}
@@ -121,6 +126,7 @@ var pluginInstallCmd = &cobra.Command{
 				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 				return fmt.Errorf("failed to install plugin %q: %w", name, err)
 			}
+			savePluginDescription(name, pluginDescription)
 			spinner.Success(fmt.Sprintf("Installed plugin %q via npm", name))
 			return nil
 		}
@@ -139,6 +145,7 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("failed to install plugin %q: %w", name, err)
 		}
 
+		savePluginDescription(name, pluginDescription)
 		spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
 		return nil
 	},
@@ -327,4 +334,14 @@ func runPluginUpdateAll() error {
 		return fmt.Errorf("%d plugin(s) failed to update: %s", len(failed), strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+func savePluginDescription(name, description string) {
+	if description == "" {
+		return
+	}
+	if m, err := plugin.LoadManifest(); err == nil {
+		m.SetDescription(name, description)
+		_ = m.Save()
+	}
 }

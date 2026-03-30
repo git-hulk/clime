@@ -8,15 +8,18 @@
 #
 # Format:
 #   - name: <plugin-name>
-#     repo: <owner/repo>           # optional, GitHub repo
-#     script: <url>                # optional, install script URL
-#     binary_path: <path>          # required when using script
-#     tags: [devops, email-parser] # optional, tag-based filtering
+#     description: <short text>      # optional, shown in help output
+#     repo: <owner/repo>             # optional, GitHub repo
+#     script: <url>                  # optional, install script URL
+#     binary_path: <path>            # required when using script
+#     tags: [devops, email-parser]   # optional, tag-based filtering
 
 plugins:
 #  - name: account
+#    description: Manage user accounts
 #    script: https://{YOUR_INSTALL_SCRIPT_URL}/install.sh
 #    binary_path: ~/.local/bin/clime-account
 #  - name: email-tools
+#    description: Parse and process email messages
 #    repo: git-hulk/clime-email-tools
 #    tags: [devops, email-parser]
