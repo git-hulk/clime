@@ -37,7 +37,7 @@ var initTags []string
 
 func init() {
 	initCmd.Flags().StringSliceVar(&initTags, "tags", nil,
-		"Only install plugins matching these tags (comma-separated); untagged plugins are always installed")
+		"Install tagged plugins matching these tags (comma-separated); untagged plugins are always installed, tagged plugins require matching tags")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -206,23 +206,16 @@ func resolvePlugins(args []string) ([]defaultPlugin, error) {
 }
 
 // filterPluginsByTags returns plugins that should be installed based on the
-// given tags. If tags is empty, all plugins are returned. Otherwise, untagged
-// plugins are always included, and tagged plugins are included only if they
-// share at least one tag with the provided list.
+// given tags. Untagged plugins are always included. Tagged plugins are only
+// included if tags are provided and they share at least one tag with the
+// provided list. If no tags are specified, tagged plugins are skipped.
 func filterPluginsByTags(plugins []defaultPlugin, tags []string) []defaultPlugin {
-	if len(tags) == 0 {
-		return plugins
-	}
-
 	tagSet := make(map[string]bool, len(tags))
 	for _, t := range tags {
 		t = strings.TrimSpace(t)
 		if t != "" {
 			tagSet[t] = true
 		}
-	}
-	if len(tagSet) == 0 {
-		return plugins
 	}
 
 	filtered := make([]defaultPlugin, 0, len(plugins))

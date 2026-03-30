@@ -18,14 +18,14 @@ func TestFilterPluginsByTags(t *testing.T) {
 		wantName []string
 	}{
 		{
-			name:     "nil tags installs all",
+			name:     "nil tags installs only untagged",
 			tags:     nil,
-			wantName: []string{"core", "devops-tool", "email", "infra"},
+			wantName: []string{"core"},
 		},
 		{
-			name:     "empty tags installs all",
+			name:     "empty tags installs only untagged",
 			tags:     []string{},
-			wantName: []string{"core", "devops-tool", "email", "infra"},
+			wantName: []string{"core"},
 		},
 		{
 			name:     "single matching tag",
@@ -50,7 +50,7 @@ func TestFilterPluginsByTags(t *testing.T) {
 		{
 			name:     "empty string tag is ignored",
 			tags:     []string{""},
-			wantName: []string{"core", "devops-tool", "email", "infra"},
+			wantName: []string{"core"},
 		},
 	}
 
