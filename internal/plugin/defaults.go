@@ -5,12 +5,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultPlugin describes a plugin entry in the remote defaults file.
-type DefaultPlugin struct {
+// Plugin describes a plugin entry in the remote defaults file.
+type Plugin struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description,omitempty"`
 	Repo        string   `yaml:"repo,omitempty"`
@@ -20,19 +21,19 @@ type DefaultPlugin struct {
 	Tags        []string `yaml:"tags,omitempty"`
 }
 
-// DefaultPlugins is the top-level structure of the remote defaults YAML.
-type DefaultPlugins struct {
-	Plugins []DefaultPlugin `yaml:"plugins"`
+// Plugins is the top-level structure of the remote defaults YAML.
+type PluginList struct {
+	Plugins []Plugin `yaml:"plugins"`
 }
 
-// LoadDefaultPluginsFromFile reads and parses a default plugins YAML file from a local path.
-func LoadDefaultPluginsFromFile(path string) (*DefaultPlugins, error) {
+// LoadPluginsFromFile reads and parses a default plugins YAML file from a local path.
+func LoadPluginsFromFile(path string) (*PluginList, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read local plugins file: %w", err)
 	}
 
-	var defaults DefaultPlugins
+	var defaults PluginList
 	if err := yaml.Unmarshal(data, &defaults); err != nil {
 		return nil, fmt.Errorf("failed to parse default plugins YAML: %w", err)
 	}
@@ -40,8 +41,37 @@ func LoadDefaultPluginsFromFile(path string) (*DefaultPlugins, error) {
 	return &defaults, nil
 }
 
-// FetchDefaultPlugins downloads and parses a default plugins YAML file from a URL.
-func FetchDefaultPlugins(url string) (*DefaultPlugins, error) {
+// FilterByTags returns plugins that should be installed based on the given
+// tags. Untagged plugins are always included. Tagged plugins are only included
+// if tags are provided and they share at least one tag with the provided list.
+// If no tags are specified, tagged plugins are skipped.
+func FilterByTags(plugins []Plugin, tags []string) []Plugin {
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tagSet[t] = true
+		}
+	}
+
+	filtered := make([]Plugin, 0, len(plugins))
+	for _, p := range plugins {
+		if len(p.Tags) == 0 {
+			filtered = append(filtered, p)
+			continue
+		}
+		for _, pt := range p.Tags {
+			if tagSet[strings.TrimSpace(pt)] {
+				filtered = append(filtered, p)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+// FetchPlugins downloads and parses a default plugins YAML file from a URL.
+func FetchPlugins(url string) (*PluginList, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch default plugins: %w", err)
@@ -57,7 +87,7 @@ func FetchDefaultPlugins(url string) (*DefaultPlugins, error) {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	var defaults DefaultPlugins
+	var defaults PluginList
 	if err := yaml.Unmarshal(data, &defaults); err != nil {
 		return nil, fmt.Errorf("failed to parse default plugins YAML: %w", err)
 	}

@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"testing"
+
+	"github.com/git-hulk/clime/internal/plugin"
 )
 
 func TestFilterPluginsByTags(t *testing.T) {
-	plugins := []defaultPlugin{
+	plugins := []plugin.Plugin{
 		{Name: "core"},                                     // untagged
 		{Name: "devops-tool", Tags: []string{"devops"}},    // single tag
 		{Name: "email", Tags: []string{"devops", "email"}}, // multi tag
@@ -56,7 +58,7 @@ func TestFilterPluginsByTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := filterPluginsByTags(plugins, tt.tags)
+			got := plugin.FilterByTags(plugins, tt.tags)
 			if len(got) != len(tt.wantName) {
 				t.Fatalf("got %d plugins, want %d", len(got), len(tt.wantName))
 			}

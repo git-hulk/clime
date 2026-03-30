@@ -9,8 +9,8 @@ import (
 
 const binPrefix = "clime-"
 
-// Plugin represents a discovered plugin binary.
-type Plugin struct {
+// DiscoveredPlugin represents a discovered plugin binary.
+type DiscoveredPlugin struct {
 	Name        string // e.g. "hr" (derived from clime-hr)
 	Path        string // absolute path to the binary
 	Description string // optional short description for help output
@@ -47,9 +47,9 @@ func Find(name string) (string, bool) {
 
 // Discover returns all plugins found in ~/.clime/plugins/ and $PATH.
 // Descriptions are populated from the plugin manifest when available.
-func Discover() []Plugin {
+func Discover() []DiscoveredPlugin {
 	seen := make(map[string]bool)
-	var plugins []Plugin
+	var plugins []DiscoveredPlugin
 
 	// Check ~/.clime/plugins/ first
 	homeDir, err := os.UserHomeDir()
@@ -77,8 +77,8 @@ func Discover() []Plugin {
 	return plugins
 }
 
-func scanDir(dir string, seen map[string]bool) []Plugin {
-	var plugins []Plugin
+func scanDir(dir string, seen map[string]bool) []DiscoveredPlugin {
+	var plugins []DiscoveredPlugin
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -101,7 +101,7 @@ func scanDir(dir string, seen map[string]bool) []Plugin {
 		fullPath := filepath.Join(dir, name)
 		if isExecutable(fullPath) {
 			seen[pluginName] = true
-			plugins = append(plugins, Plugin{Name: pluginName, Path: fullPath})
+			plugins = append(plugins, DiscoveredPlugin{Name: pluginName, Path: fullPath})
 		}
 	}
 	return plugins

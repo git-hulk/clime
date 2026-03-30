@@ -11,27 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// defaultPlugin defines a plugin to install during `clime init`.
-type defaultPlugin struct {
-	Name        string // subcommand name (e.g. "account")
-	Description string // short description shown in help output
-
-	// For GitHub Releases-based plugins (leave empty to use script-based install):
-	Repo string // GitHub repo (e.g. "git-hulk/clime-hr")
-
-	// For script-based plugins:
-	ScriptURL  string // URL of the install script (curl | sh)
-	BinaryPath string // where the script installs the binary (supports ~/)
-
-	// For npm-based plugins:
-	NpmPackage string // npm package name (e.g. "@myorg/clime-deploy")
-
-	// Tags for selective installation (empty = always install).
-	Tags []string
-}
-
 // defaultPlugins is the list of plugins installed by `clime init`.
-var defaultPlugins = []defaultPlugin{}
+var defaultPlugins = []plugin.Plugin{}
 
 var initTags []string
 
@@ -56,7 +37,7 @@ Otherwise, the built-in default plugin list is used.`,
 			return err
 		}
 
-		plugins = filterPluginsByTags(plugins, initTags)
+		plugins = plugin.FilterByTags(plugins, initTags)
 
 		if len(plugins) == 0 {
 			terminal.Warning("No default plugins configured.")
@@ -89,12 +70,12 @@ Otherwise, the built-in default plugin list is used.`,
 				installErr error
 				source     string
 			)
-			if p.NpmPackage != "" {
-				source = p.NpmPackage
-				installErr = plugin.InstallFromNpm(p.Name, p.NpmPackage)
-			} else if p.ScriptURL != "" {
-				source = p.ScriptURL
-				installErr = plugin.InstallFromScript(p.Name, p.ScriptURL, p.BinaryPath)
+			if p.Npm != "" {
+				source = p.Npm
+				installErr = plugin.InstallFromNpm(p.Name, p.Npm)
+			} else if p.Script != "" {
+				source = p.Script
+				installErr = plugin.InstallFromScript(p.Name, p.Script, p.BinaryPath)
 			} else {
 				repo := p.Repo
 				if repo == "" {
@@ -166,71 +147,30 @@ func isURL(s string) bool {
 // provided, the list is fetched from that remote YAML file. If a local file
 // path is provided, the list is loaded from that file. Otherwise the built-in
 // defaultPlugins slice is returned.
-func resolvePlugins(args []string) ([]defaultPlugin, error) {
+func resolvePlugins(args []string) ([]plugin.Plugin, error) {
 	if len(args) == 0 {
 		return defaultPlugins, nil
 	}
 
 	source := args[0]
 	var (
-		defaults *plugin.DefaultPlugins
+		defaults *plugin.PluginList
 		err      error
 	)
 
 	if isURL(source) {
 		terminal.Infof("Fetching plugin list from %s...", source)
-		defaults, err = plugin.FetchDefaultPlugins(source)
+		defaults, err = plugin.FetchPlugins(source)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch plugin list: %w", err)
 		}
 	} else {
 		terminal.Infof("Loading plugin list from %s...", source)
-		defaults, err = plugin.LoadDefaultPluginsFromFile(source)
+		defaults, err = plugin.LoadPluginsFromFile(source)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load plugin list: %w", err)
 		}
 	}
 
-	plugins := make([]defaultPlugin, 0, len(defaults.Plugins))
-	for _, p := range defaults.Plugins {
-		plugins = append(plugins, defaultPlugin{
-			Name:        p.Name,
-			Description: p.Description,
-			Repo:        p.Repo,
-			ScriptURL:   p.Script,
-			BinaryPath:  p.BinaryPath,
-			NpmPackage:  p.Npm,
-			Tags:        p.Tags,
-		})
-	}
-	return plugins, nil
-}
-
-// filterPluginsByTags returns plugins that should be installed based on the
-// given tags. Untagged plugins are always included. Tagged plugins are only
-// included if tags are provided and they share at least one tag with the
-// provided list. If no tags are specified, tagged plugins are skipped.
-func filterPluginsByTags(plugins []defaultPlugin, tags []string) []defaultPlugin {
-	tagSet := make(map[string]bool, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t != "" {
-			tagSet[t] = true
-		}
-	}
-
-	filtered := make([]defaultPlugin, 0, len(plugins))
-	for _, p := range plugins {
-		if len(p.Tags) == 0 {
-			filtered = append(filtered, p)
-			continue
-		}
-		for _, pt := range p.Tags {
-			if tagSet[strings.TrimSpace(pt)] {
-				filtered = append(filtered, p)
-				break
-			}
-		}
-	}
-	return filtered
+	return defaults.Plugins, nil
 }
