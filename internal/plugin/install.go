@@ -59,7 +59,7 @@ func InstallFromRepo(name, repo string) (string, error) {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, version, repo, "")
+	manifest.Add(name, version, SourceTypeGitHub, repo, "")
 	if err := manifest.Save(); err != nil {
 		return "", fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -114,7 +114,7 @@ func InstallFromScript(name, scriptURL, binaryPath string) error {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", scriptURL, binaryPath)
+	manifest.Add(name, "latest", SourceTypeScript, scriptURL, binaryPath)
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -173,7 +173,7 @@ func InstallFromNpm(name, npmPackage string) error {
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", npmSourcePrefix+npmPackage, "")
+	manifest.Add(name, "latest", SourceTypeNpm, npmPackage, "")
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -199,8 +199,8 @@ func Uninstall(name string) error {
 	}
 
 	// If npm source, run npm uninstall -g first
-	if entry, ok := manifest.Get(name); ok && isNpmSource(entry.Repo) {
-		pkg := npmPackageName(entry.Repo)
+	if entry, ok := manifest.Get(name); ok && entry.Type == SourceTypeNpm {
+		pkg := entry.Source
 		cmd := osexec.Command("npm", "uninstall", "-g", pkg)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: npm uninstall -g %s failed: %v\n%s", pkg, err, string(output))

@@ -31,7 +31,7 @@ func TestUpdaterSkipsWhenAlreadyLatest(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "foo", Version: "1.2.3", Repo: "acme/clime-foo"},
+					{Name: "foo", Version: "1.2.3", Type: SourceTypeGitHub, Source: "acme/clime-foo"},
 				},
 			}, nil
 		},
@@ -100,7 +100,7 @@ func TestUpdaterAppliesUpdateAndSavesManifest(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "foo", Version: "1.0.0", Repo: repo},
+					{Name: "foo", Version: "1.0.0", Type: SourceTypeGitHub, Source: repo},
 				},
 			}, nil
 		},
@@ -113,8 +113,8 @@ func TestUpdaterAppliesUpdateAndSavesManifest(t *testing.T) {
 			if entry.Version != "1.1.0" {
 				t.Fatalf("saved version = %q, want %q", entry.Version, "1.1.0")
 			}
-			if entry.Repo != repo {
-				t.Fatalf("saved repo = %q, want %q", entry.Repo, repo)
+			if entry.Source != repo {
+				t.Fatalf("saved source = %q, want %q", entry.Source, repo)
 			}
 			return nil
 		},
@@ -169,7 +169,7 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "account", Version: "latest", Repo: "https://example.com/install.sh"},
+					{Name: "account", Version: "latest", Type: SourceTypeScript, Source: "https://example.com/install.sh"},
 				},
 			}, nil
 		},
@@ -182,8 +182,8 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 			if entry.Version != "latest" {
 				t.Fatalf("saved version = %q, want %q", entry.Version, "latest")
 			}
-			if entry.Repo != "https://example.com/install.sh" {
-				t.Fatalf("saved repo = %q, want %q", entry.Repo, "https://example.com/install.sh")
+			if entry.Source != "https://example.com/install.sh" {
+				t.Fatalf("saved source = %q, want %q", entry.Source, "https://example.com/install.sh")
 			}
 			return nil
 		},
@@ -240,7 +240,7 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "deploy", Version: "latest", Repo: "npm:@myorg/clime-deploy"},
+					{Name: "deploy", Version: "latest", Type: SourceTypeNpm, Source: "@myorg/clime-deploy"},
 				},
 			}, nil
 		},
@@ -253,8 +253,8 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 			if entry.Version != "latest" {
 				t.Fatalf("saved version = %q, want %q", entry.Version, "latest")
 			}
-			if entry.Repo != "npm:@myorg/clime-deploy" {
-				t.Fatalf("saved repo = %q, want %q", entry.Repo, "npm:@myorg/clime-deploy")
+			if entry.Source != "@myorg/clime-deploy" {
+				t.Fatalf("saved source = %q, want %q", entry.Source, "@myorg/clime-deploy")
 			}
 			return nil
 		},

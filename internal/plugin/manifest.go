@@ -3,9 +3,17 @@ package plugin
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+// SourceType identifies how a plugin was installed.
+const (
+	SourceTypeGitHub = "github"
+	SourceTypeNpm    = "npm"
+	SourceTypeScript = "script"
 )
 
 // ManifestEntry represents a plugin installed via `clime plugin install`.
@@ -13,7 +21,9 @@ type ManifestEntry struct {
 	Name        string    `yaml:"name"`
 	Description string    `yaml:"description,omitempty"`
 	Version     string    `yaml:"version"`
-	Repo        string    `yaml:"repo"`
+	Type        string    `yaml:"type"`
+	Source      string    `yaml:"source"`
+	Repo        string    `yaml:"repo,omitempty"` // deprecated: migrated to Type+Source on load
 	BinaryPath  string    `yaml:"binary_path,omitempty"`
 	InstalledAt time.Time `yaml:"installed_at"`
 }
@@ -49,7 +59,36 @@ func LoadManifest() (*Manifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
+	if m.migrateRepo() {
+		_ = m.Save()
+	}
 	return &m, nil
+}
+
+// migrateRepo converts legacy "repo" field entries to Type+Source.
+// Returns true if any entries were migrated.
+func (m *Manifest) migrateRepo() bool {
+	migrated := false
+	for i, p := range m.Plugins {
+		if p.Type != "" || p.Repo == "" {
+			continue
+		}
+		repo := p.Repo
+		switch {
+		case strings.HasPrefix(repo, "npm:"):
+			m.Plugins[i].Type = SourceTypeNpm
+			m.Plugins[i].Source = strings.TrimPrefix(repo, "npm:")
+		case strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "http://"):
+			m.Plugins[i].Type = SourceTypeScript
+			m.Plugins[i].Source = repo
+		default:
+			m.Plugins[i].Type = SourceTypeGitHub
+			m.Plugins[i].Source = repo
+		}
+		m.Plugins[i].Repo = ""
+		migrated = true
+	}
+	return migrated
 }
 
 // Save writes the manifest back to disk.
@@ -69,11 +108,12 @@ func (m *Manifest) Save() error {
 }
 
 // Add adds or updates a plugin entry in the manifest.
-func (m *Manifest) Add(name, version, repo, binaryPath string) {
+func (m *Manifest) Add(name, version, sourceType, source, binaryPath string) {
 	for i, p := range m.Plugins {
 		if p.Name == name {
 			m.Plugins[i].Version = version
-			m.Plugins[i].Repo = repo
+			m.Plugins[i].Type = sourceType
+			m.Plugins[i].Source = source
 			m.Plugins[i].BinaryPath = binaryPath
 			m.Plugins[i].InstalledAt = time.Now()
 			return
@@ -82,7 +122,8 @@ func (m *Manifest) Add(name, version, repo, binaryPath string) {
 	m.Plugins = append(m.Plugins, ManifestEntry{
 		Name:        name,
 		Version:     version,
-		Repo:        repo,
+		Type:        sourceType,
+		Source:      source,
 		BinaryPath:  binaryPath,
 		InstalledAt: time.Now(),
 	})

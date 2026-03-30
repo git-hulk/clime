@@ -20,7 +20,7 @@ type UpdateOptions struct {
 // UpdateResult reports the outcome of a plugin update.
 type UpdateResult struct {
 	Name           string
-	Repo           string
+	Source         string
 	CurrentVersion string
 	LatestVersion  string
 	Updated        bool
@@ -72,20 +72,31 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 	}
 	entry, hasEntry := manifest.Get(name)
 
-	repo := strings.TrimSpace(opts.Repo)
-	if repo == "" {
-		if hasEntry && strings.TrimSpace(entry.Repo) != "" {
-			repo = strings.TrimSpace(entry.Repo)
-		} else {
-			repo = defaultPluginRepo(name)
-		}
+	// Determine source type and source value from manifest or flags.
+	sourceType := ""
+	source := ""
+	if hasEntry {
+		sourceType = entry.Type
+		source = entry.Source
 	}
-	if isNpmSource(repo) {
-		return u.updateFromNpm(manifest, name, entry, repo)
+	if repo := strings.TrimSpace(opts.Repo); repo != "" {
+		sourceType = SourceTypeGitHub
+		source = repo
 	}
-	if isScriptSource(repo) {
-		return u.updateFromScript(manifest, name, entry, repo)
+	if sourceType == "" {
+		sourceType = SourceTypeGitHub
 	}
+	if source == "" && sourceType == SourceTypeGitHub {
+		source = defaultPluginRepo(name)
+	}
+	if sourceType == SourceTypeNpm {
+		return u.updateFromNpm(manifest, name, entry, source)
+	}
+	if sourceType == SourceTypeScript {
+		return u.updateFromScript(manifest, name, entry, source)
+	}
+
+	repo := source
 
 	release, err := u.fetchLatest(repo)
 	if err != nil {
@@ -95,7 +106,7 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 	latest := release.Version()
 	result := &UpdateResult{
 		Name:           name,
-		Repo:           repo,
+		Source:         repo,
 		CurrentVersion: entry.Version,
 		LatestVersion:  latest,
 	}
@@ -128,7 +139,7 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
 
-	manifest.Add(name, latest, repo, "")
+	manifest.Add(name, latest, SourceTypeGitHub, repo, "")
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -159,14 +170,14 @@ func (u *Updater) updateFromScript(manifest *Manifest, name string, entry Manife
 		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", scriptURL, err)
 	}
 
-	manifest.Add(name, "latest", scriptURL, entry.BinaryPath)
+	manifest.Add(name, "latest", SourceTypeScript, scriptURL, entry.BinaryPath)
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
 
 	result := &UpdateResult{
 		Name:           name,
-		Repo:           scriptURL,
+		Source:         scriptURL,
 		CurrentVersion: entry.Version,
 		LatestVersion:  "latest",
 		Updated:        true,
@@ -189,7 +200,7 @@ func runNpmGlobalUpdate(pkg string) error {
 }
 
 func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestEntry, source string) (*UpdateResult, error) {
-	pkg := npmPackageName(source)
+	pkg := source
 	runNpm := u.runNpmUpdate
 	if runNpm == nil {
 		runNpm = runNpmGlobalUpdate
@@ -198,7 +209,7 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 		return nil, fmt.Errorf("failed to update npm plugin %q: %w", pkg, err)
 	}
 
-	manifest.Add(name, "latest", source, "")
+	manifest.Add(name, "latest", SourceTypeNpm, pkg, "")
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -210,7 +221,7 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 
 	return &UpdateResult{
 		Name:           name,
-		Repo:           source,
+		Source:         pkg,
 		CurrentVersion: entry.Version,
 		LatestVersion:  "latest",
 		Updated:        true,
@@ -226,16 +237,3 @@ func normalizeVersion(v string) string {
 	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
-func isScriptSource(src string) bool {
-	return strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "http://")
-}
-
-const npmSourcePrefix = "npm:"
-
-func isNpmSource(src string) bool {
-	return strings.HasPrefix(src, npmSourcePrefix)
-}
-
-func npmPackageName(src string) string {
-	return strings.TrimPrefix(src, npmSourcePrefix)
-}
