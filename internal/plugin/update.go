@@ -209,7 +209,13 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 		return nil, fmt.Errorf("failed to update npm plugin %q: %w", pkg, err)
 	}
 
-	manifest.Add(name, "latest", SourceTypeNpm, pkg, "")
+	// Get actual installed version
+	version, err := getNpmInstalledVersion(pkg)
+	if err != nil {
+		version = "latest"
+	}
+
+	manifest.Add(name, version, SourceTypeNpm, pkg, "")
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -223,7 +229,7 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 		Name:           name,
 		Source:         pkg,
 		CurrentVersion: entry.Version,
-		LatestVersion:  "latest",
+		LatestVersion:  version,
 		Updated:        true,
 		Path:           filepath.Join(installDir, binPrefix+name),
 	}, nil

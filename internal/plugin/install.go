@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -168,12 +169,17 @@ func InstallFromNpm(name, npmPackage string) error {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	// Update manifest with npm: prefix
+	// Update manifest with actual version
+	version, err := getNpmInstalledVersion(npmPackage)
+	if err != nil {
+		// Fallback to "latest" if version detection fails
+		version = "latest"
+	}
 	manifest, err := LoadManifest()
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", SourceTypeNpm, npmPackage, "")
+	manifest.Add(name, version, SourceTypeNpm, npmPackage, "")
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -187,6 +193,34 @@ func npmGlobalBinDir() (string, error) {
 		return "", fmt.Errorf("failed to get npm global prefix: %w", err)
 	}
 	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
+}
+
+// getNpmInstalledVersion returns the actual installed version of an npm package.
+func getNpmInstalledVersion(pkg string) (string, error) {
+	out, err := osexec.Command("npm", "list", "-g", pkg, "--json").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get npm package version: %w", err)
+	}
+
+	// Parse the JSON output to extract version
+	// npm list output format: {"dependencies": {"<pkg>": {"version": "x.y.z"}}}
+	var result struct {
+		Dependencies map[string]struct {
+			Version string `json:"version"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("failed to parse npm list output: %w", err)
+	}
+
+	dep, ok := result.Dependencies[pkg]
+	if !ok {
+		return "", fmt.Errorf("package %s not found in npm list output", pkg)
+	}
+	if dep.Version == "" {
+		return "", fmt.Errorf("version not found in npm list output")
+	}
+	return dep.Version, nil
 }
 
 // Uninstall removes a plugin binary and its manifest entry.
