@@ -34,9 +34,13 @@ Install a plugin, then use it as a subcommand — clime forwards all arguments t
 # Install a plugin via a custom install script
 clime plugin install account --script https://example.com/install.sh --binary-path ~/.local/bin/clime-account
 
-# Now use it — clime dispatches to the clime-account binary
+# Install a plugin from npm
+clime plugin install opencli --npm jackwener/opencli
+
+# Now use it — clime dispatches to the clime-<name> binary
 clime account login --user hulk
 clime account list
+clime opencli --help
 ```
 
 Any binary named `clime-<name>` on your `PATH` or in `~/.clime/plugins/` is automatically discovered — no extra config needed.
