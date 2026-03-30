@@ -122,10 +122,11 @@ Otherwise, the built-in default plugin list is used.`,
 
 		fmt.Println()
 		table := uicli.NewTable().
-			AddColumn("NAME").
-			AddColumn("SOURCE").
-			AddColumn("TAGS").
-			AddColumn("STATUS").
+			WithSmartWidth(1).
+			AddColumnWithWidth("NAME", 20).
+			AddColumnWithWidth("SOURCE", 60).
+			AddColumnWithWidth("TAGS", 20).
+			AddColumnWithWidth("STATUS", 20).
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
 			WithStyle(uicli.TableStyleRounded).

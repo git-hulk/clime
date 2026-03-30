@@ -310,16 +310,18 @@ func runPluginUpdateAll() error {
 		SetColumnColor(0, uicli.BrightCyanColor)
 
 	for _, r := range rows {
-		coloredStatus := r.status
+		name := uicli.TruncateString(r.name, 20)
+		status := uicli.TruncateString(r.status, 12)
+		coloredStatus := status
 		switch r.status {
 		case "Updated":
-			coloredStatus = uicli.GreenColor.Sprint(r.status)
+			coloredStatus = uicli.GreenColor.Sprint(status)
 		case "Up to date":
-			coloredStatus = uicli.DimColor.Sprint(r.status)
+			coloredStatus = uicli.DimColor.Sprint(status)
 		case "Failed":
-			coloredStatus = uicli.RedColor.Sprint(r.status)
+			coloredStatus = uicli.RedColor.Sprint(status)
 		}
-		table.AddRow(r.name, r.from, r.to, coloredStatus)
+		table.AddRow(name, r.from, r.to, coloredStatus)
 	}
 	table.Println()
 
