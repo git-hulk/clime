@@ -48,9 +48,9 @@ func NewUpdater() *Updater {
 		saveManifest: func(m *Manifest) error {
 			return m.Save()
 		},
-		writeBinary: writePluginBinary,
-		runScript:      runInstallScript,
-		runNpmUpdate:   runNpmGlobalUpdate,
+		writeBinary:  writePluginBinary,
+		runScript:    runInstallScript,
+		runNpmUpdate: runNpmGlobalUpdate,
 	}
 }
 
@@ -83,7 +83,7 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 		sourceType = SourceTypeGitHub
 	}
 	if source == "" && sourceType == SourceTypeGitHub {
-		source = defaultPluginRepo(name)
+		return nil, fmt.Errorf("no repo configured for plugin %q; use --repo to specify one", name)
 	}
 	if sourceType == SourceTypeNpm {
 		return u.updateFromNpm(manifest, name, entry, source)
@@ -111,13 +111,13 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 		return result, nil
 	}
 
-	asset, err := findAsset(release, name)
+	repoName := repoBaseName(repo)
+	asset, err := findAsset(release, repoName)
 	if err != nil {
 		return nil, err
 	}
 
-	binName := binPrefix + name
-	binaryContent, err := u.downloadBinary(asset.BrowserDownloadURL, binName)
+	binaryContent, err := u.downloadBinary(asset.BrowserDownloadURL, repoName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
@@ -130,7 +130,7 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 		return nil, fmt.Errorf("failed to create plugin directory: %w", err)
 	}
 
-	destPath := filepath.Join(installDir, binName)
+	destPath := filepath.Join(installDir, binPrefix+name)
 	if err := u.writeBinary(destPath, binaryContent); err != nil {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
@@ -231,11 +231,6 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 	}, nil
 }
 
-func defaultPluginRepo(name string) string {
-	return fmt.Sprintf("%s/clime-%s", defaultOwner, name)
-}
-
 func normalizeVersion(v string) string {
 	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
-

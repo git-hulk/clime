@@ -12,7 +12,7 @@ import (
 
 var (
 	pluginInstall plugin.Plugin
-	pluginUpdate plugin.UpdateOptions
+	pluginUpdate  plugin.UpdateOptions
 )
 
 func init() {
@@ -54,10 +54,10 @@ var pluginListCmd = &cobra.Command{
 		}
 
 		const (
-			maxNameWidth = 20
-			maxDescWidth = 40
+			maxNameWidth    = 20
+			maxDescWidth    = 40
 			maxVersionWidth = 12
-			maxPathWidth = 30
+			maxPathWidth    = 30
 		)
 
 		table := uicli.NewTable().
@@ -139,15 +139,11 @@ var pluginInstallCmd = &cobra.Command{
 			return nil
 		}
 
-		var (
-			version string
-			err     error
-		)
-		if pluginInstall.Repo != "" {
-			version, err = plugin.InstallFromRepo(name, pluginInstall.Repo)
-		} else {
-			version, err = plugin.Install(name)
+		if pluginInstall.Repo == "" {
+			spinner.Stop()
+			return fmt.Errorf("--repo is required for GitHub-based plugin install")
 		}
+		version, err := plugin.InstallFromRepo(name, pluginInstall.Repo)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 			return fmt.Errorf("failed to install plugin %q: %w", name, err)

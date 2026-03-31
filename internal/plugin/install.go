@@ -12,15 +12,6 @@ import (
 	"github.com/git-hulk/clime/internal/githubrelease"
 )
 
-const defaultOwner = "git-hulk"
-
-// Install downloads and installs a plugin from GitHub Releases.
-// It follows the convention: repo is <owner>/clime-<name>.
-func Install(name string) (string, error) {
-	repo := fmt.Sprintf("%s/clime-%s", defaultOwner, name)
-	return InstallFromRepo(name, repo)
-}
-
 // InstallFromRepo downloads and installs a plugin from a specific GitHub repo.
 func InstallFromRepo(name, repo string) (string, error) {
 	// Fetch latest release
@@ -29,14 +20,15 @@ func InstallFromRepo(name, repo string) (string, error) {
 		return "", fmt.Errorf("failed to fetch latest release for %s: %w", repo, err)
 	}
 
-	// Find matching asset
-	asset, err := findAsset(release, name)
+	// The binary name in the release asset is derived from the repo name,
+	// which may differ from the plugin name.
+	repoName := repoBaseName(repo)
+	asset, err := findAsset(release, repoName)
 	if err != nil {
 		return "", err
 	}
 
 	// Download and extract
-	binName := binPrefix + name
 	installDir, err := pluginBinDir()
 	if err != nil {
 		return "", err
@@ -45,8 +37,8 @@ func InstallFromRepo(name, repo string) (string, error) {
 		return "", fmt.Errorf("failed to create plugin directory: %w", err)
 	}
 
-	destPath := filepath.Join(installDir, binName)
-	binaryContent, err := githubrelease.DownloadTarGzBinary(asset.BrowserDownloadURL, binName)
+	destPath := filepath.Join(installDir, binPrefix+name)
+	binaryContent, err := githubrelease.DownloadTarGzBinary(asset.BrowserDownloadURL, repoName)
 	if err != nil {
 		return "", fmt.Errorf("failed to install plugin: %w", err)
 	}
@@ -265,6 +257,14 @@ func pluginBinDir() (string, error) {
 }
 
 func findAsset(release *githubrelease.Release, name string) (*githubrelease.Asset, error) {
-	pattern := fmt.Sprintf("clime-%s_", name)
+	pattern := fmt.Sprintf("%s_", name)
 	return release.FindTarGzAsset(pattern, runtime.GOOS, runtime.GOARCH)
+}
+
+// repoBaseName returns the last path segment of an "owner/name" repo string.
+func repoBaseName(repo string) string {
+	if i := strings.LastIndex(repo, "/"); i >= 0 {
+		return repo[i+1:]
+	}
+	return repo
 }

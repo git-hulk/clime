@@ -1,10 +1,10 @@
 package plugin
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/githubrelease"
@@ -297,43 +297,41 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 	}
 }
 
-func TestUpdaterUsesDefaultRepoWhenManifestIsEmpty(t *testing.T) {
+func TestUpdaterErrorsWhenNoRepoConfigured(t *testing.T) {
 	t.Parallel()
 
-	sentinel := errors.New("fetch failure")
 	u := &Updater{
 		fetchLatest: func(repo string) (*githubrelease.Release, error) {
-			if repo != "git-hulk/clime-foo" {
-				t.Fatalf("default repo = %q, want %q", repo, "git-hulk/clime-foo")
-			}
-			return nil, sentinel
+			t.Fatal("fetchLatest should not be called when no repo is configured")
+			return nil, nil
 		},
 		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			t.Fatal("downloadBinary should not be called on fetch error")
+			t.Fatal("downloadBinary should not be called when no repo is configured")
 			return nil, nil
 		},
 		pluginBinDir: func() (string, error) {
-			t.Fatal("pluginBinDir should not be called on fetch error")
+			t.Fatal("pluginBinDir should not be called when no repo is configured")
 			return "", nil
 		},
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{}, nil
 		},
 		saveManifest: func(*Manifest) error {
-			t.Fatal("saveManifest should not be called on fetch error")
+			t.Fatal("saveManifest should not be called when no repo is configured")
 			return nil
 		},
 		writeBinary: func(destPath string, binaryContent []byte) error {
-			t.Fatal("writeBinary should not be called on fetch error")
+			t.Fatal("writeBinary should not be called when no repo is configured")
 			return nil
 		},
 	}
 
 	_, err := u.Update(UpdateOptions{Name: "foo"})
 	if err == nil {
-		t.Fatal("Update() expected fetch error")
+		t.Fatal("Update() expected error when no repo is configured")
 	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("Update() error = %v, want wrapped sentinel", err)
+	wantMsg := "no repo configured"
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("Update() error = %q, want it to contain %q", err.Error(), wantMsg)
 	}
 }
