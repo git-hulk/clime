@@ -90,11 +90,7 @@ fi
 if [ -n "$AUTH_HEADER" ]; then
     RELEASE_TAG=$(curl -sSf -H "$AUTH_HEADER" "$GITHUB_API_URL" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
 else
-    # Try the API first; fall back to the redirect-based approach if rate-limited
-    RELEASE_TAG=$(curl -sSf "$GITHUB_API_URL" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//' || true)
-    if [ -z "$RELEASE_TAG" ]; then
-        RELEASE_TAG=$(curl -sSfI "https://github.com/${REPO}/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's|.*/tag/||;s/[[:space:]]*$//')
-    fi
+    RELEASE_TAG=$(curl -sSf "$GITHUB_API_URL" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
 fi
 
 if [ -z "$RELEASE_TAG" ]; then
