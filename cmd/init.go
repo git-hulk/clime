@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/url"
-	"path/filepath"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
@@ -80,9 +79,6 @@ Otherwise, the built-in default plugin list is used.`,
 				}
 			}
 			if path, ok := plugin.Find(p.Name); ok {
-				if resolved, err := filepath.EvalSymlinks(path); err == nil {
-					path = resolved
-				}
 				spinner.Success(fmt.Sprintf("Installed %q (%s)", p.Name, path))
 			} else {
 				spinner.Success(fmt.Sprintf("Installed %q", p.Name))

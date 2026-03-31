@@ -139,10 +139,6 @@ func executablePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// If launched via symlink, update the underlying binary target.
-	if resolved, err := filepath.EvalSymlinks(execPath); err == nil {
-		return resolved, nil
-	}
 	return execPath, nil
 }
 
