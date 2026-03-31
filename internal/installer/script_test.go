@@ -1,6 +1,10 @@
 package installer
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
@@ -118,6 +122,139 @@ func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
 	}
 	if result.LatestVersion != plugin.VersionLatest {
 		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, plugin.VersionLatest)
+	}
+}
+
+func TestScriptInstallerInstallAutoDetectBinary(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	s := &ScriptInstaller{
+		ScriptURL: "https://bun.sh/install",
+		runScript: func(scriptURL string) error {
+			return nil
+		},
+		pluginBinDir: func() (string, error) {
+			return tmpDir, nil
+		},
+		findPlugin: func(name string) (string, bool) {
+			return "/usr/local/bin/bun", true
+		},
+		runVersion: func(binPath string) (string, error) {
+			return "1.2.0", nil
+		},
+		lookPath: func(name string) (string, error) {
+			if name != "bun" {
+				t.Fatalf("lookPath name = %q, want %q", name, "bun")
+			}
+			return "/usr/local/bin/bun", nil
+		},
+	}
+
+	version, err := s.Install("bun")
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if version != "1.2.0" {
+		t.Fatalf("version = %q, want %q", version, "1.2.0")
+	}
+
+	// Verify symlink was created
+	linkPath := filepath.Join(tmpDir, "clime-bun")
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("symlink not created: %v", err)
+	}
+	if target != "/usr/local/bin/bun" {
+		t.Fatalf("symlink target = %q, want %q", target, "/usr/local/bin/bun")
+	}
+}
+
+func TestScriptInstallerInstallAutoDetectNotFound(t *testing.T) {
+	t.Parallel()
+
+	s := &ScriptInstaller{
+		ScriptURL: "https://example.com/install.sh",
+		runScript: func(scriptURL string) error {
+			return nil
+		},
+		lookPath: func(name string) (string, error) {
+			return "", fmt.Errorf("not found")
+		},
+	}
+
+	_, err := s.Install("missing")
+	if err == nil {
+		t.Fatal("Install() should fail when binary not found on PATH")
+	}
+	if !strings.Contains(err.Error(), "not found on PATH") {
+		t.Fatalf("error = %q, want message about PATH", err.Error())
+	}
+}
+
+func TestRunPluginVersionCmdFallback(t *testing.T) {
+	t.Parallel()
+
+	// Create a script that only responds to -V
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "fakecli")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+case "$1" in
+  -V) echo "3.2.1" ;;
+  *)  exit 1 ;;
+esac
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runPluginVersionCmd(script)
+	if err != nil {
+		t.Fatalf("runPluginVersionCmd() error = %v", err)
+	}
+	if !strings.Contains(out, "3.2.1") {
+		t.Fatalf("output = %q, want to contain %q", out, "3.2.1")
+	}
+}
+
+func TestRunPluginVersionCmdFirstMatch(t *testing.T) {
+	t.Parallel()
+
+	// Create a script that responds to -v (first in the list)
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "fakecli")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+case "$1" in
+  -v) echo "1.0.0" ;;
+  version) echo "1.0.0-full" ;;
+  -V) echo "1.0.0-caps" ;;
+  *)  exit 1 ;;
+esac
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runPluginVersionCmd(script)
+	if err != nil {
+		t.Fatalf("runPluginVersionCmd() error = %v", err)
+	}
+	if !strings.Contains(out, "1.0.0\n") {
+		t.Fatalf("output = %q, want first match (-v)", out)
+	}
+}
+
+func TestRunPluginVersionCmdAllFail(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "fakecli")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runPluginVersionCmd(script)
+	if err == nil {
+		t.Fatal("runPluginVersionCmd() should fail when all commands fail")
 	}
 }
 

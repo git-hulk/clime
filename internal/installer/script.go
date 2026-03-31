@@ -18,6 +18,7 @@ type ScriptInstaller struct {
 	pluginBinDir func() (string, error)
 	findPlugin   func(name string) (string, bool)
 	runVersion   func(binPath string) (string, error)
+	lookPath     func(name string) (string, error)
 }
 
 // NewScriptInstaller returns a ScriptInstaller for the given script URL and binary path.
@@ -29,6 +30,7 @@ func NewScriptInstaller(scriptURL, binaryPath string) *ScriptInstaller {
 		pluginBinDir: plugin.PluginBinDir,
 		findPlugin:   plugin.Find,
 		runVersion:   runPluginVersionCmd,
+		lookPath:     osexec.LookPath,
 	}
 }
 
@@ -37,8 +39,8 @@ func (s *ScriptInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("install script failed: %w", err)
 	}
 
-	if s.BinaryPath != "" {
-		binaryPath := s.BinaryPath
+	binaryPath := s.BinaryPath
+	if binaryPath != "" {
 		if strings.HasPrefix(binaryPath, "~/") {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -46,24 +48,30 @@ func (s *ScriptInstaller) Install(name string) (string, error) {
 			}
 			binaryPath = filepath.Join(home, binaryPath[2:])
 		}
-
 		if _, err := os.Stat(binaryPath); err != nil {
 			return "", fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
 		}
-
-		installDir, err := s.pluginBinDir()
+	} else {
+		// Auto-detect binary on PATH by name
+		found, err := s.lookPath(name)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("binary %q not found on PATH after install; use --binary-path to specify its location", name)
 		}
-		if err := os.MkdirAll(installDir, 0755); err != nil {
-			return "", err
-		}
+		binaryPath = found
+	}
 
-		linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
-		os.Remove(linkPath)
-		if err := os.Symlink(binaryPath, linkPath); err != nil {
-			return "", fmt.Errorf("failed to create symlink: %w", err)
-		}
+	installDir, err := s.pluginBinDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return "", err
+	}
+
+	linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
+	os.Remove(linkPath)
+	if err := os.Symlink(binaryPath, linkPath); err != nil {
+		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
 	version := s.DetectVersion(name)
@@ -130,9 +138,11 @@ func runInstallScript(scriptURL string) error {
 }
 
 func runPluginVersionCmd(binPath string) (string, error) {
-	out, err := osexec.Command(binPath, "version").CombinedOutput()
-	if err != nil {
-		return "", err
+	for _, arg := range []string{"-v", "version", "-V"} {
+		out, err := osexec.Command(binPath, arg).CombinedOutput()
+		if err == nil {
+			return string(out), nil
+		}
 	}
-	return string(out), nil
+	return "", fmt.Errorf("failed to detect version for %s", binPath)
 }
