@@ -7,7 +7,17 @@ import (
 	"strings"
 )
 
-const binPrefix = "clime-"
+// BinPrefix is the naming prefix for plugin binaries (e.g. "clime-hr").
+const BinPrefix = "clime-"
+
+// PluginBinDir returns the directory where managed plugin binaries are stored.
+func PluginBinDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".clime", "plugins"), nil
+}
 
 // DiscoveredPlugin represents a discovered plugin binary.
 type DiscoveredPlugin struct {
@@ -19,7 +29,7 @@ type DiscoveredPlugin struct {
 // Find looks for a plugin binary matching the given name.
 // It searches ~/.clime/plugins/ and $PATH for an executable named clime-<name>.
 func Find(name string) (string, bool) {
-	binName := binPrefix + name
+	binName := BinPrefix + name
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
@@ -88,10 +98,10 @@ func scanDir(dir string, seen map[string]bool) []DiscoveredPlugin {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasPrefix(name, binPrefix) {
+		if !strings.HasPrefix(name, BinPrefix) {
 			continue
 		}
-		pluginName := strings.TrimPrefix(name, binPrefix)
+		pluginName := strings.TrimPrefix(name, BinPrefix)
 		if runtime.GOOS == "windows" {
 			pluginName = strings.TrimSuffix(pluginName, ".exe")
 		}

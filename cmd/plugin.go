@@ -6,13 +6,15 @@ import (
 	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
+	"github.com/git-hulk/clime/internal/installer"
 	"github.com/git-hulk/clime/internal/plugin"
 	"github.com/spf13/cobra"
 )
 
 var (
-	pluginInstall plugin.Plugin
-	pluginUpdate  plugin.UpdateOptions
+	pluginInstall     plugin.Plugin
+	pluginUpdateRepo  string
+	pluginUpdateForce bool
 )
 
 func init() {
@@ -21,8 +23,8 @@ func init() {
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Script, "script", "", "URL of an install script to run (curl | sh)")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.BinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Description, "description", "", "short description shown in help output")
-	pluginUpdateCmd.Flags().StringVar(&pluginUpdate.Repo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
-	pluginUpdateCmd.Flags().BoolVar(&pluginUpdate.Force, "force", false, "Update even if current version matches latest release")
+	pluginUpdateCmd.Flags().StringVar(&pluginUpdateRepo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
+	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateForce, "force", false, "Update even if current version matches latest release")
 
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginInstallCmd)
@@ -113,43 +115,35 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("--npm, --repo, and --script are mutually exclusive")
 		}
 
+		inst, err := installer.FromPlugin(pluginInstall)
+		if err != nil {
+			return err
+		}
+
 		spinner := uicli.NewSpinner().
 			WithStyle(uicli.SpinnerDots).
 			WithColor(uicli.CyanColor).
 			WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
 			Start()
 
-		if pluginInstall.Script != "" {
-			if err := plugin.InstallFromScript(name, pluginInstall.Script, pluginInstall.BinaryPath); err != nil {
-				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
-				return fmt.Errorf("failed to install plugin %q: %w", name, err)
-			}
-			savePluginDescription(name, pluginInstall.Description)
-			spinner.Success(fmt.Sprintf("Installed plugin %q via install script", name))
-			return nil
-		}
-
-		if pluginInstall.Npm != "" {
-			if err := plugin.InstallFromNpm(name, pluginInstall.Npm); err != nil {
-				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
-				return fmt.Errorf("failed to install plugin %q: %w", name, err)
-			}
-			savePluginDescription(name, pluginInstall.Description)
-			spinner.Success(fmt.Sprintf("Installed plugin %q via npm", name))
-			return nil
-		}
-
-		if pluginInstall.Repo == "" {
-			spinner.Stop()
-			return fmt.Errorf("--repo is required for GitHub-based plugin install")
-		}
-		version, err := plugin.InstallFromRepo(name, pluginInstall.Repo)
+		version, err := inst.Install(name)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 			return fmt.Errorf("failed to install plugin %q: %w", name, err)
 		}
 
-		savePluginDescription(name, pluginInstall.Description)
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+		manifest.Add(name, version, inst.PluginType(), inst.Source(), "")
+		if pluginInstall.Description != "" {
+			manifest.SetDescription(name, pluginInstall.Description)
+		}
+		if err := manifest.Save(); err != nil {
+			return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
+		}
+
 		spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
 		return nil
 	},
@@ -166,10 +160,28 @@ var pluginRemoveCmd = &cobra.Command{
 			WithColor(uicli.CyanColor).
 			WithMessage(fmt.Sprintf("Removing plugin %q...", name)).
 			Start()
-		if err := plugin.Uninstall(name); err != nil {
+
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+
+		entry, _ := manifest.Get(name)
+		inst, err := installer.FromManifest(entry)
+		if err != nil {
+			// If we can't determine the installer type, just remove the binary directly
+			inst = installer.NewGitHubInstaller("")
+		}
+		if err := inst.Uninstall(name, entry); err != nil {
 			spinner.Error(fmt.Sprintf("Failed to remove plugin %q", name))
 			return fmt.Errorf("failed to remove plugin %q: %w", name, err)
 		}
+
+		manifest.Remove(name)
+		if err := manifest.Save(); err != nil {
+			return fmt.Errorf("plugin removed but failed to update manifest: %w", err)
+		}
+
 		spinner.Success(fmt.Sprintf("Removed plugin %q", name))
 		return nil
 	},
@@ -192,8 +204,29 @@ var pluginUpdateCmd = &cobra.Command{
 			WithMessage(fmt.Sprintf("Checking updates for plugin %q...", name)).
 			Start()
 
-		pluginUpdate.Name = name
-		result, err := plugin.Update(pluginUpdate)
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+
+		entry, _ := manifest.Get(name)
+
+		var inst installer.Installer
+		if repo := strings.TrimSpace(pluginUpdateRepo); repo != "" {
+			inst = installer.NewGitHubInstaller(repo)
+		} else {
+			inst, err = installer.FromManifest(entry)
+			if err != nil {
+				if entry.Type == "" {
+					spinner.Stop()
+					return fmt.Errorf("no source configured for plugin %q; use --repo to specify one", name)
+				}
+				spinner.Error(fmt.Sprintf("Failed to update plugin %q", name))
+				return err
+			}
+		}
+
+		result, err := inst.Update(name, entry)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed to update plugin %q", name))
 			return fmt.Errorf("failed to update plugin %q: %w", name, err)
@@ -202,6 +235,11 @@ var pluginUpdateCmd = &cobra.Command{
 		if !result.Updated {
 			spinner.Info(fmt.Sprintf("Plugin %q is already up to date (%s)", name, result.LatestVersion))
 			return nil
+		}
+
+		manifest.Add(name, result.LatestVersion, inst.PluginType(), inst.Source(), entry.BinaryPath)
+		if err := manifest.Save(); err != nil {
+			return fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 		}
 
 		if result.CurrentVersion == "" {
@@ -215,8 +253,8 @@ var pluginUpdateCmd = &cobra.Command{
 }
 
 func runPluginUpdateAll() error {
-	if pluginUpdate.Repo != "" {
-		return fmt.Errorf("--repo cannot be used with \"*\"; repos are resolved per plugin from manifest/default convention")
+	if pluginUpdateRepo != "" {
+		return fmt.Errorf("--repo cannot be used with \"all\"; repos are resolved per plugin from manifest/default convention")
 	}
 
 	manifest, err := plugin.LoadManifest()
@@ -258,10 +296,15 @@ func runPluginUpdateAll() error {
 			WithMessage(fmt.Sprintf("Checking %q...", name)).
 			Start()
 
-		result, err := plugin.Update(plugin.UpdateOptions{
-			Name:  name,
-			Force: pluginUpdate.Force,
-		})
+		entry, _ := manifest.Get(name)
+		inst, err := installer.FromManifest(entry)
+		if err != nil {
+			spinner.Error(fmt.Sprintf("Failed: %s", name))
+			failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
+			continue
+		}
+
+		result, err := inst.Update(name, entry)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed: %s", name))
 			failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
@@ -271,6 +314,13 @@ func runPluginUpdateAll() error {
 		if !result.Updated {
 			spinner.Info(fmt.Sprintf("%s is up to date", name))
 			skipped++
+			continue
+		}
+
+		manifest.Add(name, result.LatestVersion, inst.PluginType(), inst.Source(), entry.BinaryPath)
+		if err := manifest.Save(); err != nil {
+			spinner.Error(fmt.Sprintf("Failed: %s (manifest save)", name))
+			failed = append(failed, fmt.Sprintf("%s (manifest save: %v)", name, err))
 			continue
 		}
 
@@ -289,14 +339,4 @@ func runPluginUpdateAll() error {
 		return fmt.Errorf("%d plugin(s) failed to update: %s", len(failed), strings.Join(failed, "; "))
 	}
 	return nil
-}
-
-func savePluginDescription(name, description string) {
-	if description == "" {
-		return
-	}
-	if m, err := plugin.LoadManifest(); err == nil {
-		m.SetDescription(name, description)
-		_ = m.Save()
-	}
 }

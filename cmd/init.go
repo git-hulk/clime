@@ -5,6 +5,7 @@ import (
 	"net/url"
 
 	uicli "github.com/alperdrsnn/clime"
+	"github.com/git-hulk/clime/internal/installer"
 	"github.com/git-hulk/clime/internal/plugin"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,11 @@ Otherwise, the built-in default plugin list is used.`,
 		terminal.Infof("Installing %d default plugin(s)...", len(plugins))
 		fmt.Println()
 
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+
 		var failed []string
 
 		for _, p := range plugins {
@@ -54,35 +60,34 @@ Otherwise, the built-in default plugin list is used.`,
 				WithMessage(fmt.Sprintf("Installing %q...", p.Name)).
 				Start()
 
-			var installErr error
-			if p.Npm != "" {
-				installErr = plugin.InstallFromNpm(p.Name, p.Npm)
-			} else if p.Script != "" {
-				installErr = plugin.InstallFromScript(p.Name, p.Script, p.BinaryPath)
-			} else {
-				repo := p.Repo
-				if repo == "" {
-					repo = fmt.Sprintf("git-hulk/clime-%s", p.Name)
-				}
-				_, installErr = plugin.InstallFromRepo(p.Name, repo)
+			inst, err := installer.FromPlugin(p)
+			if err != nil {
+				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, err))
+				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, err))
+				continue
 			}
 
+			version, installErr := inst.Install(p.Name)
 			if installErr != nil {
 				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, installErr))
 				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, installErr))
 				continue
 			}
+
+			manifest.Add(p.Name, version, inst.PluginType(), inst.Source(), "")
 			if p.Description != "" {
-				if m, err := plugin.LoadManifest(); err == nil {
-					m.SetDescription(p.Name, p.Description)
-					_ = m.Save()
-				}
+				manifest.SetDescription(p.Name, p.Description)
 			}
+
 			if path, ok := plugin.Find(p.Name); ok {
 				spinner.Success(fmt.Sprintf("Installed %q (%s)", p.Name, path))
 			} else {
 				spinner.Success(fmt.Sprintf("Installed %q", p.Name))
 			}
+		}
+
+		if err := manifest.Save(); err != nil {
+			return fmt.Errorf("failed to save manifest: %w", err)
 		}
 
 		if len(failed) > 0 {
