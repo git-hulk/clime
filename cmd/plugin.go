@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -55,37 +56,63 @@ var pluginListCmd = &cobra.Command{
 			return nil
 		}
 
+		fmt.Println()
+		fmt.Printf("  %s %s\n\n",
+			uicli.BoldColor.Sprint("Plugins"),
+			uicli.DimColor.Sprintf("(%d installed)", len(discovered)),
+		)
+
+		home, _ := os.UserHomeDir()
+
 		const (
-			maxNameWidth    = 20
-			maxDescWidth    = 40
-			maxVersionWidth = 12
-			maxPathWidth    = 30
+			nameWidth    = 16
+			descWidth    = 60 
+			versionWidth = 16
+			sourceWidth  = 16 
+			pathWidth    = 50
 		)
 
 		table := uicli.NewTable().
 			AutoResize(false).
-			AddColumnWithWidth("NAME", maxNameWidth).
-			AddColumnWithWidth("DESCRIPTION", maxDescWidth).
-			AddColumnWithWidth("VERSION", maxVersionWidth).
-			AddColumnWithWidth("PATH", maxPathWidth).
+			AddColumnWithWidth("NAME", nameWidth).
+			AddColumnWithWidth("DESCRIPTION", descWidth).
+			AddColumnWithWidth("VERSION", versionWidth).
+			AddColumnWithWidth("SOURCE", sourceWidth).
+			AddColumnWithWidth("PATH", pathWidth).
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
 			WithStyle(uicli.TableStyleRounded).
 			SetColumnColor(0, uicli.BrightCyanColor).
 			SetColumnColor(1, uicli.DimColor).
 			SetColumnColor(2, uicli.GreenColor).
-			SetColumnColor(3, uicli.DimColor)
+			SetColumnColor(3, uicli.YellowColor).
+			SetColumnColor(4, uicli.DimColor)
 
 		for _, p := range discovered {
-			version := ""
+			version := "—"
+			source := "—"
 			if entry, ok := manifest.Get(p.Name); ok {
-				version = entry.Version
+				if entry.Version != "" {
+					version = entry.Version
+				}
+				if entry.Type != "" {
+					source = entry.Type
+				}
+			}
+			desc := p.Description
+			if desc == "" {
+				desc = "—"
+			}
+			path := p.Path
+			if home != "" {
+				path = strings.Replace(path, home, "~", 1)
 			}
 			table.AddRow(
-				uicli.TruncateString(p.Name, maxNameWidth),
-				uicli.TruncateString(p.Description, maxDescWidth),
-				uicli.TruncateString(version, maxVersionWidth),
-				uicli.TruncateString(p.Path, maxPathWidth),
+				uicli.TruncateString(p.Name, nameWidth),
+				uicli.TruncateString(desc, descWidth),
+				uicli.TruncateString(version, versionWidth),
+				uicli.TruncateString(source, sourceWidth),
+				uicli.TruncateString(path, pathWidth),
 			)
 		}
 		table.Println()
