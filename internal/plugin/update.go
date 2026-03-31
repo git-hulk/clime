@@ -29,14 +29,15 @@ type UpdateResult struct {
 
 // Updater updates plugin binaries from their configured sources.
 type Updater struct {
-	fetchLatest    func(repo string) (*githubrelease.Release, error)
-	downloadBinary func(url, binaryName string) ([]byte, error)
-	pluginBinDir   func() (string, error)
-	loadManifest   func() (*Manifest, error)
-	saveManifest   func(*Manifest) error
-	writeBinary    func(destPath string, binaryContent []byte) error
-	runScript      func(scriptURL string) error
-	runNpmUpdate   func(pkg string) error
+	fetchLatest         func(repo string) (*githubrelease.Release, error)
+	downloadBinary      func(url, binaryName string) ([]byte, error)
+	pluginBinDir        func() (string, error)
+	loadManifest        func() (*Manifest, error)
+	saveManifest        func(*Manifest) error
+	writeBinary         func(destPath string, binaryContent []byte) error
+	runScript           func(scriptURL string) error
+	runNpmUpdate        func(pkg string) error
+	detectScriptVersion func(name string) string
 }
 
 func NewUpdater() *Updater {
@@ -48,9 +49,10 @@ func NewUpdater() *Updater {
 		saveManifest: func(m *Manifest) error {
 			return m.Save()
 		},
-		writeBinary:  writePluginBinary,
-		runScript:    runInstallScript,
-		runNpmUpdate: runNpmGlobalUpdate,
+		writeBinary:         writePluginBinary,
+		runScript:           runInstallScript,
+		runNpmUpdate:        runNpmGlobalUpdate,
+		detectScriptVersion: detectScriptPluginVersion,
 	}
 }
 
@@ -166,7 +168,14 @@ func (u *Updater) updateFromScript(manifest *Manifest, name string, entry Manife
 		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", scriptURL, err)
 	}
 
-	manifest.Add(name, "latest", SourceTypeScript, scriptURL, entry.BinaryPath)
+	// Detect version from the installed binary's "version" command
+	detectVersion := u.detectScriptVersion
+	if detectVersion == nil {
+		detectVersion = detectScriptPluginVersion
+	}
+	version := detectVersion(name)
+
+	manifest.Add(name, version, SourceTypeScript, scriptURL, entry.BinaryPath)
 	if err := u.saveManifest(manifest); err != nil {
 		return nil, fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 	}
@@ -175,7 +184,7 @@ func (u *Updater) updateFromScript(manifest *Manifest, name string, entry Manife
 		Name:           name,
 		Source:         scriptURL,
 		CurrentVersion: entry.Version,
-		LatestVersion:  "latest",
+		LatestVersion:  version,
 		Updated:        true,
 	}
 
@@ -208,7 +217,7 @@ func (u *Updater) updateFromNpm(manifest *Manifest, name string, entry ManifestE
 	// Get actual installed version
 	version, err := getNpmInstalledVersion(pkg)
 	if err != nil {
-		version = "latest"
+		version = VersionLatest
 	}
 
 	manifest.Add(name, version, SourceTypeNpm, pkg, "")

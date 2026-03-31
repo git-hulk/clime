@@ -6,11 +6,14 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
 	"github.com/git-hulk/clime/internal/githubrelease"
 )
+
+var semverRe = regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
 
 // InstallFromRepo downloads and installs a plugin from a specific GitHub repo.
 func InstallFromRepo(name, repo string) (string, error) {
@@ -102,12 +105,15 @@ func InstallFromScript(name, scriptURL, binaryPath string) error {
 		}
 	}
 
+	// Detect version from the installed binary's "version" command
+	version := detectScriptPluginVersion(name)
+
 	// Update manifest
 	manifest, err := LoadManifest()
 	if err != nil {
 		manifest = &Manifest{}
 	}
-	manifest.Add(name, "latest", SourceTypeScript, scriptURL, binaryPath)
+	manifest.Add(name, version, SourceTypeScript, scriptURL, binaryPath)
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
@@ -165,7 +171,7 @@ func InstallFromNpm(name, npmPackage string) error {
 	version, err := getNpmInstalledVersion(npmPackage)
 	if err != nil {
 		// Fallback to "latest" if version detection fails
-		version = "latest"
+		version = VersionLatest
 	}
 	manifest, err := LoadManifest()
 	if err != nil {
@@ -267,4 +273,43 @@ func repoBaseName(repo string) string {
 		return repo[i+1:]
 	}
 	return repo
+}
+
+// detectScriptPluginVersion attempts to determine the version of a
+// script-installed plugin by running its "version" command. It returns
+// "latest" if the command fails or the output cannot be parsed.
+func detectScriptPluginVersion(name string) string {
+	binPath, ok := Find(name)
+	if !ok {
+		return VersionLatest
+	}
+
+	out, err := osexec.Command(binPath, "version").CombinedOutput()
+	if err != nil {
+		return VersionLatest
+	}
+
+	return parseVersionOutput(string(out))
+}
+
+// parseVersionOutput extracts a version string from command output.
+// It tries to match semver (N.N.N or vN.N.N), then falls back to a
+// single-word token (e.g. "dev"), and returns "latest" otherwise.
+func parseVersionOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return VersionLatest
+	}
+
+	// Try to match semver pattern (N.N.N or vN.N.N) anywhere in the output.
+	if m := semverRe.FindStringSubmatch(output); m != nil {
+		return m[1]
+	}
+
+	// If the output is a single word (e.g. "dev"), use it as the version.
+	if !strings.ContainsAny(output, " \t\n") {
+		return output
+	}
+
+	return VersionLatest
 }

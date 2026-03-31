@@ -169,7 +169,7 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "account", Version: "latest", Type: SourceTypeScript, Source: "https://example.com/install.sh"},
+					{Name: "account", Version: VersionLatest, Type: SourceTypeScript, Source: "https://example.com/install.sh"},
 				},
 			}, nil
 		},
@@ -179,8 +179,8 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 			if !ok {
 				t.Fatal("manifest entry for account not found")
 			}
-			if entry.Version != "latest" {
-				t.Fatalf("saved version = %q, want %q", entry.Version, "latest")
+			if entry.Version != "2.1.0" {
+				t.Fatalf("saved version = %q, want %q", entry.Version, "2.1.0")
 			}
 			if entry.Source != "https://example.com/install.sh" {
 				t.Fatalf("saved source = %q, want %q", entry.Source, "https://example.com/install.sh")
@@ -198,6 +198,9 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 			}
 			return nil
 		},
+		detectScriptVersion: func(name string) string {
+			return "2.1.0"
+		},
 	}
 
 	result, err := u.Update(UpdateOptions{Name: "account"})
@@ -213,8 +216,54 @@ func TestUpdaterUpdatesScriptBasedSource(t *testing.T) {
 	if !result.Updated {
 		t.Fatal("Update() should mark updated for script source")
 	}
-	if result.LatestVersion != "latest" {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "latest")
+	if result.LatestVersion != "2.1.0" {
+		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "2.1.0")
+	}
+}
+
+func TestUpdaterUpdatesScriptBasedSourceFallsBackToLatest(t *testing.T) {
+	t.Parallel()
+
+	var saved bool
+	u := &Updater{
+		pluginBinDir: func() (string, error) {
+			return "/tmp/clime-plugin-test", nil
+		},
+		loadManifest: func() (*Manifest, error) {
+			return &Manifest{
+				Plugins: []ManifestEntry{
+					{Name: "tool", Version: "1.0.0", Type: SourceTypeScript, Source: "https://example.com/install.sh"},
+				},
+			}, nil
+		},
+		saveManifest: func(m *Manifest) error {
+			saved = true
+			entry, ok := m.Get("tool")
+			if !ok {
+				t.Fatal("manifest entry for tool not found")
+			}
+			if entry.Version != VersionLatest {
+				t.Fatalf("saved version = %q, want %q", entry.Version, VersionLatest)
+			}
+			return nil
+		},
+		runScript: func(scriptURL string) error {
+			return nil
+		},
+		detectScriptVersion: func(name string) string {
+			return VersionLatest
+		},
+	}
+
+	result, err := u.Update(UpdateOptions{Name: "tool"})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !saved {
+		t.Fatal("manifest should be saved")
+	}
+	if result.LatestVersion != VersionLatest {
+		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, VersionLatest)
 	}
 }
 
@@ -240,7 +289,7 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 		loadManifest: func() (*Manifest, error) {
 			return &Manifest{
 				Plugins: []ManifestEntry{
-					{Name: "deploy", Version: "latest", Type: SourceTypeNpm, Source: "@myorg/clime-deploy"},
+					{Name: "deploy", Version: VersionLatest, Type: SourceTypeNpm, Source: "@myorg/clime-deploy"},
 				},
 			}, nil
 		},
@@ -250,8 +299,8 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 			if !ok {
 				t.Fatal("manifest entry for deploy not found")
 			}
-			if entry.Version != "latest" {
-				t.Fatalf("saved version = %q, want %q", entry.Version, "latest")
+			if entry.Version != VersionLatest {
+				t.Fatalf("saved version = %q, want %q", entry.Version, VersionLatest)
 			}
 			if entry.Source != "@myorg/clime-deploy" {
 				t.Fatalf("saved source = %q, want %q", entry.Source, "@myorg/clime-deploy")
@@ -288,8 +337,8 @@ func TestUpdaterUpdatesNpmBasedSource(t *testing.T) {
 	if !result.Updated {
 		t.Fatal("Update() should mark updated for npm source")
 	}
-	if result.LatestVersion != "latest" {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "latest")
+	if result.LatestVersion != VersionLatest {
+		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, VersionLatest)
 	}
 	wantPath := filepath.Join("/tmp/clime-plugin-test", "clime-deploy")
 	if result.Path != wantPath {

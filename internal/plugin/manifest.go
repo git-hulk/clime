@@ -14,6 +14,10 @@ const (
 	SourceTypeGitHub = "github"
 	SourceTypeNpm    = "npm"
 	SourceTypeScript = "script"
+
+	// VersionLatest is the fallback version used when actual version
+	// detection is unavailable or fails.
+	VersionLatest = "latest"
 )
 
 // ManifestEntry represents a plugin installed via `clime plugin install`.
