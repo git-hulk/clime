@@ -82,12 +82,18 @@ func (s *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 		return nil, err
 	}
 
+	updated := true
+	if current.Version != "" && semverRe.MatchString(version) &&
+		normalizeVersion(current.Version) == normalizeVersion(version) {
+		updated = false
+	}
+
 	return &UpdateResult{
 		Name:           name,
 		Source:         s.ScriptURL,
 		CurrentVersion: current.Version,
 		LatestVersion:  version,
-		Updated:        true,
+		Updated:        updated,
 		Path:           filepath.Join(installDir, plugin.BinPrefix+name),
 	}, nil
 }

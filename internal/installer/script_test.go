@@ -52,6 +52,41 @@ func TestScriptInstallerUpdate(t *testing.T) {
 	}
 }
 
+func TestScriptInstallerUpdateUpToDate(t *testing.T) {
+	t.Parallel()
+
+	s := &ScriptInstaller{
+		ScriptURL:  "https://example.com/install.sh",
+		BinaryPath: "/usr/local/bin/account",
+		runScript: func(scriptURL string) error {
+			return nil
+		},
+		pluginBinDir: func() (string, error) {
+			return "/tmp/clime-plugin-test", nil
+		},
+		findPlugin: func(name string) (string, bool) {
+			return "/usr/local/bin/account", true
+		},
+		runVersion: func(binPath string) (string, error) {
+			return "2.1.0", nil
+		},
+	}
+
+	entry := plugin.ManifestEntry{
+		Name:    "account",
+		Version: "2.1.0",
+		Type:    plugin.SourceTypeScript,
+		Source:  "https://example.com/install.sh",
+	}
+	result, err := s.Update("account", entry)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if result.Updated {
+		t.Fatal("Update() should not mark updated when semver version is unchanged")
+	}
+}
+
 func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
 	t.Parallel()
 

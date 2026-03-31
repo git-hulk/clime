@@ -53,6 +53,37 @@ func TestNpmInstallerUpdate(t *testing.T) {
 	}
 }
 
+func TestNpmInstallerUpdateUpToDate(t *testing.T) {
+	t.Parallel()
+
+	n := &NpmInstaller{
+		Package: "@myorg/clime-deploy",
+		runNpmUpdate: func(pkg string) error {
+			return nil
+		},
+		pluginBinDir: func() (string, error) {
+			return "/tmp/clime-plugin-test", nil
+		},
+		getVersion: func(pkg string) (string, error) {
+			return "1.2.3", nil
+		},
+	}
+
+	entry := plugin.ManifestEntry{
+		Name:    "deploy",
+		Version: "1.2.3",
+		Type:    plugin.SourceTypeNpm,
+		Source:  "@myorg/clime-deploy",
+	}
+	result, err := n.Update("deploy", entry)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if result.Updated {
+		t.Fatal("Update() should not mark updated when semver version is unchanged")
+	}
+}
+
 func TestNpmInstallerPluginType(t *testing.T) {
 	t.Parallel()
 	n := NewNpmInstaller("@myorg/clime-deploy")

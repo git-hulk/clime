@@ -43,7 +43,7 @@ var updateCmd = &cobra.Command{
 		}
 
 		if !result.Updated {
-			spinner.Info(fmt.Sprintf("Already up to date (%s)", result.LatestVersion))
+			spinner.Success(fmt.Sprintf("Already up to date (%s)", result.LatestVersion))
 			return nil
 		}
 

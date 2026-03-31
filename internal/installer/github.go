@@ -75,6 +75,7 @@ func (g *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 		Source:         g.Repo,
 		CurrentVersion: current.Version,
 		LatestVersion:  latest,
+		Updated:        false,
 	}
 
 	if current.Version != "" && normalizeVersion(current.Version) == normalizeVersion(latest) {
