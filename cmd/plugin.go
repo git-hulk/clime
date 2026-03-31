@@ -66,9 +66,9 @@ var pluginListCmd = &cobra.Command{
 
 		const (
 			nameWidth    = 16
-			descWidth    = 60 
+			descWidth    = 60
 			versionWidth = 16
-			sourceWidth  = 16 
+			sourceWidth  = 16
 			pathWidth    = 50
 		)
 
@@ -125,6 +125,12 @@ var pluginInstallCmd = &cobra.Command{
 	Short: "Install a plugin from GitHub Releases, npm, or an install script",
 	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package, or --script to run a remote install script.",
 	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -181,6 +187,12 @@ var pluginUninstallCmd = &cobra.Command{
 	Aliases: []string{"remove"},
 	Short:   "Uninstall an installed plugin",
 	Args:    cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeInstalledPlugins(toComplete), cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		spinner := uicli.NewSpinner().
@@ -220,6 +232,14 @@ var pluginUpdateCmd = &cobra.Command{
 	Short: "Update an installed plugin",
 	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default git-hulk/clime-<name> convention. Use '*' or 'all' to update all managed plugins.",
 	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		completions := completeInstalledPlugins(toComplete)
+		completions = append(completions, "all\tupdate all plugins")
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if strings.EqualFold(name, "all") {
@@ -367,4 +387,20 @@ func runPluginUpdateAll() error {
 		return fmt.Errorf("%d plugin(s) failed to update: %s", len(failed), strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+// completeInstalledPlugins returns completion suggestions for installed plugin names.
+func completeInstalledPlugins(toComplete string) []string {
+	discovered := plugin.Discover()
+	var completions []string
+	for _, p := range discovered {
+		if strings.HasPrefix(p.Name, toComplete) {
+			desc := p.Description
+			if desc == "" {
+				desc = p.Name + " plugin"
+			}
+			completions = append(completions, p.Name+"\t"+desc)
+		}
+	}
+	return completions
 }
