@@ -70,15 +70,11 @@ func (u *Updater) Update(opts UpdateOptions) (*UpdateResult, error) {
 	if err != nil || manifest == nil {
 		manifest = &Manifest{}
 	}
-	entry, hasEntry := manifest.Get(name)
+	entry, _ := manifest.Get(name)
 
 	// Determine source type and source value from manifest or flags.
-	sourceType := ""
-	source := ""
-	if hasEntry {
-		sourceType = entry.Type
-		source = entry.Source
-	}
+	sourceType := entry.Type
+	source := entry.Source
 	if repo := strings.TrimSpace(opts.Repo); repo != "" {
 		sourceType = SourceTypeGitHub
 		source = repo
