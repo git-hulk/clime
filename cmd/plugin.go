@@ -29,7 +29,7 @@ func init() {
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginInstallCmd)
 	pluginCmd.AddCommand(pluginUpdateCmd)
-	pluginCmd.AddCommand(pluginRemoveCmd)
+	pluginCmd.AddCommand(pluginUninstallCmd)
 	rootCmd.AddCommand(pluginCmd)
 }
 
@@ -149,10 +149,11 @@ var pluginInstallCmd = &cobra.Command{
 	},
 }
 
-var pluginRemoveCmd = &cobra.Command{
-	Use:   "remove <name>",
-	Short: "Remove an installed plugin",
-	Args:  cobra.ExactArgs(1),
+var pluginUninstallCmd = &cobra.Command{
+	Use:     "uninstall <name>",
+	Aliases: []string{"remove"},
+	Short:   "Uninstall an installed plugin",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		spinner := uicli.NewSpinner().
