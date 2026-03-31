@@ -261,7 +261,7 @@ var pluginUpdateCmd = &cobra.Command{
 		}
 
 		if !result.Updated {
-			spinner.Info(fmt.Sprintf("Plugin %q is already up to date (%s)", name, result.LatestVersion))
+			spinner.Success(fmt.Sprintf("%s is up to date", name))
 			return nil
 		}
 
@@ -340,7 +340,7 @@ func runPluginUpdateAll() error {
 		}
 
 		if !result.Updated {
-			spinner.Info(fmt.Sprintf("%s is up to date", name))
+			spinner.Success(fmt.Sprintf("%s is up to date", name))
 			skipped++
 			continue
 		}
