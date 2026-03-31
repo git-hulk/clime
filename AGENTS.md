@@ -28,6 +28,7 @@
 - Design carefully when creating new commands, including command API and member function signatures (name, parameters, and return values).
 - Keep functionality between commands orthogonal and clean.
 - Avoid ad hoc helper functions; prioritize maintainable, well-structured code.
+- Reuse existing structs (e.g., `plugin.Plugin`, `plugin.UpdateOptions`) for command flag bindings instead of declaring separate variables. Bind flags directly to struct fields.
 
 ## Testing Guidelines
 - Framework: Go `testing` package.

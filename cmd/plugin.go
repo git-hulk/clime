@@ -10,24 +10,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pluginRepo string
-var pluginNpm string
-var pluginScript string
-var pluginBinaryPath string
-var pluginDescription string
 var (
-	pluginUpdateRepo  string
-	pluginUpdateForce bool
+	pluginInstall plugin.Plugin
+	pluginUpdate plugin.UpdateOptions
 )
 
 func init() {
-	pluginInstallCmd.Flags().StringVar(&pluginRepo, "repo", "", "GitHub repo (owner/name) to install from, overrides the default convention")
-	pluginInstallCmd.Flags().StringVar(&pluginNpm, "npm", "", "npm package name to install globally")
-	pluginInstallCmd.Flags().StringVar(&pluginScript, "script", "", "URL of an install script to run (curl | sh)")
-	pluginInstallCmd.Flags().StringVar(&pluginBinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
-	pluginInstallCmd.Flags().StringVar(&pluginDescription, "description", "", "short description shown in help output")
-	pluginUpdateCmd.Flags().StringVar(&pluginUpdateRepo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
-	pluginUpdateCmd.Flags().BoolVar(&pluginUpdateForce, "force", false, "Update even if current version matches latest release")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.Repo, "repo", "", "GitHub repo (owner/name) to install from, overrides the default convention")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.Npm, "npm", "", "npm package name to install globally")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.Script, "script", "", "URL of an install script to run (curl | sh)")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.BinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.Description, "description", "", "short description shown in help output")
+	pluginUpdateCmd.Flags().StringVar(&pluginUpdate.Repo, "repo", "", "GitHub repo (owner/name) to update from, overrides manifest/default convention")
+	pluginUpdateCmd.Flags().BoolVar(&pluginUpdate.Force, "force", false, "Update even if current version matches latest release")
 
 	pluginCmd.AddCommand(pluginListCmd)
 	pluginCmd.AddCommand(pluginInstallCmd)
@@ -61,6 +56,7 @@ var pluginListCmd = &cobra.Command{
 		const (
 			maxNameWidth = 20
 			maxDescWidth = 40
+			maxVersionWidth = 12
 			maxPathWidth = 30
 		)
 
@@ -68,7 +64,7 @@ var pluginListCmd = &cobra.Command{
 			AutoResize(false).
 			AddColumnWithWidth("NAME", maxNameWidth).
 			AddColumnWithWidth("DESCRIPTION", maxDescWidth).
-			AddColumnWithWidth("VERSION", 12).
+			AddColumnWithWidth("VERSION", maxVersionWidth).
 			AddColumnWithWidth("PATH", maxPathWidth).
 			WithHeaderColor(uicli.CyanColor).
 			WithBorderColor(uicli.BlueColor).
@@ -86,7 +82,7 @@ var pluginListCmd = &cobra.Command{
 			table.AddRow(
 				uicli.TruncateString(p.Name, maxNameWidth),
 				uicli.TruncateString(p.Description, maxDescWidth),
-				version,
+				uicli.TruncateString(version, maxVersionWidth),
 				uicli.TruncateString(p.Path, maxPathWidth),
 			)
 		}
@@ -104,13 +100,13 @@ var pluginInstallCmd = &cobra.Command{
 		name := args[0]
 
 		sources := 0
-		if pluginNpm != "" {
+		if pluginInstall.Npm != "" {
 			sources++
 		}
-		if pluginRepo != "" {
+		if pluginInstall.Repo != "" {
 			sources++
 		}
-		if pluginScript != "" {
+		if pluginInstall.Script != "" {
 			sources++
 		}
 		if sources > 1 {
@@ -123,22 +119,22 @@ var pluginInstallCmd = &cobra.Command{
 			WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
 			Start()
 
-		if pluginScript != "" {
-			if err := plugin.InstallFromScript(name, pluginScript, pluginBinaryPath); err != nil {
+		if pluginInstall.Script != "" {
+			if err := plugin.InstallFromScript(name, pluginInstall.Script, pluginInstall.BinaryPath); err != nil {
 				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 				return fmt.Errorf("failed to install plugin %q: %w", name, err)
 			}
-			savePluginDescription(name, pluginDescription)
+			savePluginDescription(name, pluginInstall.Description)
 			spinner.Success(fmt.Sprintf("Installed plugin %q via install script", name))
 			return nil
 		}
 
-		if pluginNpm != "" {
-			if err := plugin.InstallFromNpm(name, pluginNpm); err != nil {
+		if pluginInstall.Npm != "" {
+			if err := plugin.InstallFromNpm(name, pluginInstall.Npm); err != nil {
 				spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 				return fmt.Errorf("failed to install plugin %q: %w", name, err)
 			}
-			savePluginDescription(name, pluginDescription)
+			savePluginDescription(name, pluginInstall.Description)
 			spinner.Success(fmt.Sprintf("Installed plugin %q via npm", name))
 			return nil
 		}
@@ -147,8 +143,8 @@ var pluginInstallCmd = &cobra.Command{
 			version string
 			err     error
 		)
-		if pluginRepo != "" {
-			version, err = plugin.InstallFromRepo(name, pluginRepo)
+		if pluginInstall.Repo != "" {
+			version, err = plugin.InstallFromRepo(name, pluginInstall.Repo)
 		} else {
 			version, err = plugin.Install(name)
 		}
@@ -157,7 +153,7 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("failed to install plugin %q: %w", name, err)
 		}
 
-		savePluginDescription(name, pluginDescription)
+		savePluginDescription(name, pluginInstall.Description)
 		spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
 		return nil
 	},
@@ -184,13 +180,13 @@ var pluginRemoveCmd = &cobra.Command{
 }
 
 var pluginUpdateCmd = &cobra.Command{
-	Use:   "update <name|*|all>",
+	Use:   "update <name|all>",
 	Short: "Update an installed plugin",
 	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default git-hulk/clime-<name> convention. Use '*' or 'all' to update all managed plugins.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		if name == "*" || strings.EqualFold(name, "all") {
+		if strings.EqualFold(name, "all") {
 			return runPluginUpdateAll()
 		}
 
@@ -200,11 +196,8 @@ var pluginUpdateCmd = &cobra.Command{
 			WithMessage(fmt.Sprintf("Checking updates for plugin %q...", name)).
 			Start()
 
-		result, err := plugin.Update(plugin.UpdateOptions{
-			Name:  name,
-			Repo:  pluginUpdateRepo,
-			Force: pluginUpdateForce,
-		})
+		pluginUpdate.Name = name
+		result, err := plugin.Update(pluginUpdate)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed to update plugin %q", name))
 			return fmt.Errorf("failed to update plugin %q: %w", name, err)
@@ -226,7 +219,7 @@ var pluginUpdateCmd = &cobra.Command{
 }
 
 func runPluginUpdateAll() error {
-	if pluginUpdateRepo != "" {
+	if pluginUpdate.Repo != "" {
 		return fmt.Errorf("--repo cannot be used with \"*\"; repos are resolved per plugin from manifest/default convention")
 	}
 
@@ -256,16 +249,7 @@ func runPluginUpdateAll() error {
 	terminal.Infof("Checking updates for %d plugin(s)...", len(names))
 	fmt.Println()
 
-	type updateRow struct {
-		name   string
-		from   string
-		to     string
-		status string
-		errMsg string
-	}
-
 	var (
-		rows    []updateRow
 		updated int
 		skipped int
 		failed  []string
@@ -280,62 +264,23 @@ func runPluginUpdateAll() error {
 
 		result, err := plugin.Update(plugin.UpdateOptions{
 			Name:  name,
-			Force: pluginUpdateForce,
+			Force: pluginUpdate.Force,
 		})
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed: %s", name))
 			failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
-			rows = append(rows, updateRow{name: name, status: "Failed", errMsg: err.Error()})
 			continue
 		}
 
 		if !result.Updated {
 			spinner.Info(fmt.Sprintf("%s is up to date", name))
 			skipped++
-			rows = append(rows, updateRow{
-				name:   name,
-				from:   result.CurrentVersion,
-				to:     result.LatestVersion,
-				status: "Up to date",
-			})
 			continue
 		}
 
 		spinner.Success(fmt.Sprintf("Updated %s: %s → %s", name, result.CurrentVersion, result.LatestVersion))
 		updated++
-		rows = append(rows, updateRow{
-			name:   name,
-			from:   result.CurrentVersion,
-			to:     result.LatestVersion,
-			status: "Updated",
-		})
 	}
-
-	table := uicli.NewTable().
-		AddColumn("NAME").
-		AddColumn("FROM").
-		AddColumn("TO").
-		AddColumn("STATUS").
-		WithHeaderColor(uicli.CyanColor).
-		WithBorderColor(uicli.BlueColor).
-		WithStyle(uicli.TableStyleRounded).
-		SetColumnColor(0, uicli.BrightCyanColor)
-
-	for _, r := range rows {
-		name := uicli.TruncateString(r.name, 20)
-		status := uicli.TruncateString(r.status, 12)
-		coloredStatus := status
-		switch r.status {
-		case "Updated":
-			coloredStatus = uicli.GreenColor.Sprint(status)
-		case "Up to date":
-			coloredStatus = uicli.DimColor.Sprint(status)
-		case "Failed":
-			coloredStatus = uicli.RedColor.Sprint(status)
-		}
-		table.AddRow(name, r.from, r.to, coloredStatus)
-	}
-	table.Println()
 
 	fmt.Println()
 	fmt.Printf("  %s %s, %s, %s\n",

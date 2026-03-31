@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
-
 	"net/url"
+	"path/filepath"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
@@ -47,17 +46,7 @@ Otherwise, the built-in default plugin list is used.`,
 		terminal.Infof("Installing %d default plugin(s)...", len(plugins))
 		fmt.Println()
 
-		type installRow struct {
-			name   string
-			source string
-			tags   string
-			status string
-		}
-
-		var (
-			rows   []installRow
-			failed []string
-		)
+		var failed []string
 
 		for _, p := range plugins {
 			spinner := uicli.NewSpinner().
@@ -66,29 +55,22 @@ Otherwise, the built-in default plugin list is used.`,
 				WithMessage(fmt.Sprintf("Installing %q...", p.Name)).
 				Start()
 
-			var (
-				installErr error
-				source     string
-			)
+			var installErr error
 			if p.Npm != "" {
-				source = p.Npm
 				installErr = plugin.InstallFromNpm(p.Name, p.Npm)
 			} else if p.Script != "" {
-				source = p.Script
 				installErr = plugin.InstallFromScript(p.Name, p.Script, p.BinaryPath)
 			} else {
 				repo := p.Repo
 				if repo == "" {
 					repo = fmt.Sprintf("git-hulk/clime-%s", p.Name)
 				}
-				source = repo
 				_, installErr = plugin.InstallFromRepo(p.Name, repo)
 			}
 
 			if installErr != nil {
 				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, installErr))
 				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, installErr))
-				rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Failed"})
 				continue
 			}
 			if p.Description != "" {
@@ -97,34 +79,15 @@ Otherwise, the built-in default plugin list is used.`,
 					_ = m.Save()
 				}
 			}
-			spinner.Success(fmt.Sprintf("Installed %q", p.Name))
-			rows = append(rows, installRow{name: p.Name, source: source, tags: strings.Join(p.Tags, ", "), status: "Installed"})
-		}
-
-		fmt.Println()
-		table := uicli.NewTable().
-			WithSmartWidth(1).
-			AddColumnWithWidth("NAME", 20).
-			AddColumnWithWidth("SOURCE", 60).
-			AddColumnWithWidth("TAGS", 20).
-			AddColumnWithWidth("STATUS", 20).
-			WithHeaderColor(uicli.CyanColor).
-			WithBorderColor(uicli.BlueColor).
-			WithStyle(uicli.TableStyleRounded).
-			SetColumnColor(0, uicli.BrightCyanColor).
-			SetColumnColor(1, uicli.DimColor).
-			SetColumnColor(2, uicli.DimColor)
-		for _, r := range rows {
-			coloredStatus := r.status
-			switch r.status {
-			case "Installed":
-				coloredStatus = uicli.GreenColor.Sprint(r.status)
-			case "Failed":
-				coloredStatus = uicli.RedColor.Sprint(r.status)
+			if path, ok := plugin.Find(p.Name); ok {
+				if resolved, err := filepath.EvalSymlinks(path); err == nil {
+					path = resolved
+				}
+				spinner.Success(fmt.Sprintf("Installed %q (%s)", p.Name, path))
+			} else {
+				spinner.Success(fmt.Sprintf("Installed %q", p.Name))
 			}
-			table.AddRow(r.name, r.source, r.tags, coloredStatus)
 		}
-		table.Println()
 
 		if len(failed) > 0 {
 			fmt.Println()
