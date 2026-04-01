@@ -87,7 +87,9 @@ var pluginListCmd = &cobra.Command{
 		}
 
 		const gap = 2
+		const indent = "  "
 		// Print bold headers.
+		fmt.Print(indent)
 		for i, h := range headers {
 			if i > 0 {
 				fmt.Print(strings.Repeat(" ", gap))
@@ -96,6 +98,7 @@ var pluginListCmd = &cobra.Command{
 		}
 		fmt.Println()
 		// Print separator.
+		fmt.Print(indent)
 		for i, w := range colWidths {
 			if i > 0 {
 				fmt.Print(strings.Repeat(" ", gap))
@@ -105,6 +108,7 @@ var pluginListCmd = &cobra.Command{
 		fmt.Println()
 		// Print data rows.
 		for _, row := range rows {
+			fmt.Print(indent)
 			for i, cell := range row {
 				if i > 0 {
 					fmt.Print(strings.Repeat(" ", gap))
