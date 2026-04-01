@@ -414,7 +414,7 @@ func runPluginUpdateAll() error {
 		uicli.RedColor.Sprintf("%d failed", len(failed)),
 	)
 	if len(failed) > 0 {
-		return fmt.Errorf("%d plugin(s) failed to update: %s", len(failed), strings.Join(failed, "; "))
+		return fmt.Errorf("%d plugin(s) failed to update:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
 	}
 	return nil
 }
