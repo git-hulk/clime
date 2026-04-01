@@ -10,7 +10,7 @@ func TestUniquePluginNames(t *testing.T) {
 		"",
 		"account",
 		"opencli",
-		"  opencli  ",
+		"opencli",
 		"cmdb",
 	})
 

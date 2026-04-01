@@ -218,10 +218,18 @@ var pluginUninstallCmd = &cobra.Command{
 	Short:   "Uninstall one or more installed plugins",
 	Args:    cobra.MinimumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
+		already := make(map[string]struct{}, len(args))
+		for _, a := range args {
+			already[a] = struct{}{}
 		}
-		return completeInstalledPlugins(toComplete), cobra.ShellCompDirectiveNoFileComp
+		var filtered []string
+		for _, c := range completeInstalledPlugins(toComplete) {
+			name := strings.SplitN(c, "\t", 2)[0]
+			if _, ok := already[name]; !ok {
+				filtered = append(filtered, c)
+			}
+		}
+		return filtered, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := plugin.LoadManifest()
@@ -272,11 +280,11 @@ var pluginUninstallCmd = &cobra.Command{
 
 		if len(names) > 1 {
 			fmt.Println()
-			fmt.Printf("  %s %s, %s\n",
-				uicli.BoldColor.Sprint("Summary:"),
-				uicli.GreenColor.Sprintf("%d removed", removed),
-				uicli.RedColor.Sprintf("%d failed", len(failed)),
-			)
+			summary := uicli.GreenColor.Sprintf("%d removed", removed)
+			if len(failed) > 0 {
+				summary += ", " + uicli.RedColor.Sprintf("%d failed", len(failed))
+			}
+			fmt.Printf("  %s %s\n", uicli.BoldColor.Sprint("Summary:"), summary)
 		}
 
 		if len(failed) > 0 {
@@ -469,7 +477,6 @@ func uniquePluginNames(args []string) []string {
 	seen := make(map[string]struct{}, len(args))
 	names := make([]string, 0, len(args))
 	for _, name := range args {
-		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
