@@ -65,60 +65,82 @@ var pluginListCmd = &cobra.Command{
 
 		home, _ := os.UserHomeDir()
 
-		const (
-			nameWidth    = 16
-			descWidth    = 60
-			versionWidth = 16
-			sourceWidth  = 16
-			pathWidth    = 50
-		)
-
-		table := uicli.NewTable().
-			AutoResize(false).
-			AddColumnWithWidth("NAME", nameWidth).
-			AddColumnWithWidth("DESCRIPTION", descWidth).
-			AddColumnWithWidth("VERSION", versionWidth).
-			AddColumnWithWidth("SOURCE", sourceWidth).
-			AddColumnWithWidth("PATH", pathWidth).
-			WithHeaderColor(uicli.CyanColor).
-			WithBorderColor(uicli.BlueColor).
-			WithStyle(uicli.TableStyleRounded).
-			SetColumnColor(0, uicli.BrightCyanColor).
-			SetColumnColor(1, uicli.DimColor).
-			SetColumnColor(2, uicli.GreenColor).
-			SetColumnColor(3, uicli.YellowColor).
-			SetColumnColor(4, uicli.DimColor)
-
+		const descWidth = 60
+		headers := []string{"NAME", "DESCRIPTION", "VERSION", "SOURCE", "PATH"}
+		var rows [][]string
 		for _, p := range discovered {
-			version := "—"
-			source := "—"
-			if entry, ok := manifest.Get(p.Name); ok {
-				if entry.Version != "" {
-					version = entry.Version
-				}
-				if entry.Type != "" {
-					source = entry.Type
-				}
-			}
-			desc := p.Description
-			if desc == "" {
-				desc = "—"
-			}
-			path := p.Path
-			if home != "" {
-				path = strings.Replace(path, home, "~", 1)
-			}
-			table.AddRow(
-				uicli.TruncateString(p.Name, nameWidth),
-				uicli.TruncateString(desc, descWidth),
-				uicli.TruncateString(version, versionWidth),
-				uicli.TruncateString(source, sourceWidth),
-				uicli.TruncateString(path, pathWidth),
-			)
+			name, desc, version, source, path := pluginListColumns(p, manifest, home, descWidth)
+			rows = append(rows, []string{name, desc, version, source, path})
 		}
-		table.Println()
+
+		// Compute max width per column from headers and data.
+		colWidths := make([]int, len(headers))
+		for i, h := range headers {
+			colWidths[i] = len(h)
+		}
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > colWidths[i] {
+					colWidths[i] = len(cell)
+				}
+			}
+		}
+
+		const gap = 2
+		// Print bold headers.
+		for i, h := range headers {
+			if i > 0 {
+				fmt.Print(strings.Repeat(" ", gap))
+			}
+			fmt.Print(uicli.BoldColor.Sprintf("%-*s", colWidths[i], h))
+		}
+		fmt.Println()
+		// Print separator.
+		for i, w := range colWidths {
+			if i > 0 {
+				fmt.Print(strings.Repeat(" ", gap))
+			}
+			fmt.Print(strings.Repeat("-", w))
+		}
+		fmt.Println()
+		// Print data rows.
+		for _, row := range rows {
+			for i, cell := range row {
+				if i > 0 {
+					fmt.Print(strings.Repeat(" ", gap))
+				}
+				fmt.Printf("%-*s", colWidths[i], cell)
+			}
+			fmt.Println()
+		}
 		return nil
 	},
+}
+
+func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, home string, descWidth int) (name, desc, version, source, path string) {
+	name = p.Name
+	version = "—"
+	source = "—"
+	if entry, ok := manifest.Get(p.Name); ok {
+		if entry.Version != "" {
+			version = entry.Version
+		}
+		if entry.Type != "" {
+			source = entry.Type
+		}
+	}
+
+	desc = p.Description
+	if desc == "" {
+		desc = "—"
+	}
+	desc = uicli.TruncateString(desc, descWidth)
+
+	path = p.Path
+	if home != "" {
+		path = strings.Replace(path, home, "~", 1)
+	}
+	return name, desc, version, source, path
 }
 
 var pluginInstallCmd = &cobra.Command{
