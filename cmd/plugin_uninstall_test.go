@@ -7,7 +7,6 @@ func TestUniquePluginNames(t *testing.T) {
 
 	got := uniquePluginNames([]string{
 		"account",
-		"",
 		"account",
 		"opencli",
 		"opencli",

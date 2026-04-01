@@ -239,7 +239,7 @@ var pluginUninstallCmd = &cobra.Command{
 
 		names := uniquePluginNames(args)
 		if len(names) > 1 {
-			terminal.Infof("Removing %d plugin(s)...", len(names))
+			terminal.Infof("Removing %d plugins...", len(names))
 			fmt.Println()
 		}
 
@@ -477,9 +477,6 @@ func uniquePluginNames(args []string) []string {
 	seen := make(map[string]struct{}, len(args))
 	names := make([]string, 0, len(args))
 	for _, name := range args {
-		if name == "" {
-			continue
-		}
 		if _, ok := seen[name]; ok {
 			continue
 		}
