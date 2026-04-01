@@ -172,7 +172,12 @@ func runBrewInstall(formula string) error {
 
 func runBrewUpdate(formula string) error {
 	cmd := osexec.Command("brew", "upgrade", formula)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// brew upgrade exits non-zero when the formula is already at the latest version.
+		if strings.Contains(string(output), "already installed") {
+			return nil
+		}
 		return fmt.Errorf("brew upgrade failed: %w\n%s", err, string(output))
 	}
 	return nil
