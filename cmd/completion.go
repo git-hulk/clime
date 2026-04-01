@@ -7,6 +7,7 @@ import (
 )
 
 func init() {
+	completionCmd.AddCommand(completionInstallCmd)
 	completionCmd.AddCommand(completionBashCmd)
 	completionCmd.AddCommand(completionZshCmd)
 	completionCmd.AddCommand(completionFishCmd)
@@ -15,7 +16,7 @@ func init() {
 }
 
 var completionCmd = &cobra.Command{
-	Use:   "completion [bash|zsh|fish|powershell]",
+	Use:   "completion [install|bash|zsh|fish|powershell]",
 	Short: "Generate shell completion scripts",
 	Long: `Generate shell completion scripts for clime.
 
