@@ -18,6 +18,7 @@ type Plugin struct {
 	Script      string   `yaml:"script,omitempty"`
 	BinaryPath  string   `yaml:"binary_path,omitempty"`
 	Npm         string   `yaml:"npm,omitempty"`
+	Brew        string   `yaml:"brew,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
 }
 

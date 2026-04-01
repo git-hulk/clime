@@ -50,12 +50,14 @@ func FromPlugin(p plugin.Plugin) (Installer, error) {
 	switch {
 	case p.Npm != "":
 		return NewNpmInstaller(p.Npm), nil
+	case p.Brew != "":
+		return NewBrewInstaller(p.Brew), nil
 	case p.Script != "":
 		return NewScriptInstaller(p.Script, p.BinaryPath), nil
 	case p.Repo != "":
 		return NewGitHubInstaller(p.Repo), nil
 	default:
-		return nil, fmt.Errorf("plugin %q has no install source configured (set --repo, --npm, or --script)", p.Name)
+		return nil, fmt.Errorf("plugin %q has no install source configured (set --repo, --npm, --brew, or --script)", p.Name)
 	}
 }
 
@@ -66,6 +68,8 @@ func FromManifest(entry plugin.ManifestEntry) (Installer, error) {
 		return NewGitHubInstaller(entry.Source), nil
 	case plugin.SourceTypeNpm:
 		return NewNpmInstaller(entry.Source), nil
+	case plugin.SourceTypeBrew:
+		return NewBrewInstaller(entry.Source), nil
 	case plugin.SourceTypeScript:
 		return NewScriptInstaller(entry.Source, entry.BinaryPath), nil
 	default:
