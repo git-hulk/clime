@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/installer"
@@ -65,60 +66,45 @@ var pluginListCmd = &cobra.Command{
 
 		home, _ := os.UserHomeDir()
 
-		const (
-			nameWidth    = 16
-			descWidth    = 60
-			versionWidth = 16
-			sourceWidth  = 16
-			pathWidth    = 50
-		)
-
-		table := uicli.NewTable().
-			AutoResize(false).
-			AddColumnWithWidth("NAME", nameWidth).
-			AddColumnWithWidth("DESCRIPTION", descWidth).
-			AddColumnWithWidth("VERSION", versionWidth).
-			AddColumnWithWidth("SOURCE", sourceWidth).
-			AddColumnWithWidth("PATH", pathWidth).
-			WithHeaderColor(uicli.CyanColor).
-			WithBorderColor(uicli.BlueColor).
-			WithStyle(uicli.TableStyleRounded).
-			SetColumnColor(0, uicli.BrightCyanColor).
-			SetColumnColor(1, uicli.DimColor).
-			SetColumnColor(2, uicli.GreenColor).
-			SetColumnColor(3, uicli.YellowColor).
-			SetColumnColor(4, uicli.DimColor)
+		const descWidth = 60
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tDESCRIPTION\tVERSION\tSOURCE\tPATH")
 
 		for _, p := range discovered {
-			version := "—"
-			source := "—"
-			if entry, ok := manifest.Get(p.Name); ok {
-				if entry.Version != "" {
-					version = entry.Version
-				}
-				if entry.Type != "" {
-					source = entry.Type
-				}
-			}
-			desc := p.Description
-			if desc == "" {
-				desc = "—"
-			}
-			path := p.Path
-			if home != "" {
-				path = strings.Replace(path, home, "~", 1)
-			}
-			table.AddRow(
-				p.Name,
-				uicli.TruncateString(desc, descWidth),
-				version,
-				source,
-				path,
-			)
+			name, desc, version, source, path := pluginListColumns(p, manifest, home, descWidth)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, desc, version, source, path)
 		}
-		table.Println()
+		if err := w.Flush(); err != nil {
+			return fmt.Errorf("render plugin list: %w", err)
+		}
 		return nil
 	},
+}
+
+func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, home string, descWidth int) (name, desc, version, source, path string) {
+	name = p.Name
+	version = "—"
+	source = "—"
+	if entry, ok := manifest.Get(p.Name); ok {
+		if entry.Version != "" {
+			version = entry.Version
+		}
+		if entry.Type != "" {
+			source = entry.Type
+		}
+	}
+
+	desc = p.Description
+	if desc == "" {
+		desc = "—"
+	}
+	desc = uicli.TruncateString(desc, descWidth)
+
+	path = p.Path
+	if home != "" {
+		path = strings.Replace(path, home, "~", 1)
+	}
+	return name, desc, version, source, path
 }
 
 var pluginInstallCmd = &cobra.Command{
