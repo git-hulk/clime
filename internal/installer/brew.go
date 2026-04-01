@@ -42,7 +42,7 @@ func (b *BrewInstaller) Install(name string) (string, error) {
 	}
 
 	if err := b.runBrewInstall(b.Formula); err != nil {
-		return "", fmt.Errorf("brew install failed: %w", err)
+		return "", fmt.Errorf("installing formula %q: %w", b.Formula, err)
 	}
 
 	binaryPath, err := b.resolveInstalledBinary(name)
@@ -73,6 +73,10 @@ func (b *BrewInstaller) Install(name string) (string, error) {
 }
 
 func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
+	if _, err := b.lookPath("brew"); err != nil {
+		return nil, fmt.Errorf("homebrew is not installed or not on PATH: %w", err)
+	}
+
 	if err := b.runBrewUpdate(b.Formula); err != nil {
 		return nil, fmt.Errorf("failed to update brew plugin %q: %w", b.Formula, err)
 	}
@@ -85,6 +89,15 @@ func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*Upda
 	installDir, err := b.pluginBinDir()
 	if err != nil {
 		return nil, err
+	}
+
+	// Re-resolve the binary and update the symlink, since brew upgrade
+	// may change the Cellar path the binary lives under.
+	binaryPath, err := b.resolveInstalledBinary(name)
+	if err == nil {
+		linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
+		os.Remove(linkPath)
+		_ = os.Symlink(binaryPath, linkPath)
 	}
 
 	updated := true
@@ -104,7 +117,9 @@ func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*Upda
 }
 
 func (b *BrewInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
-	if err := b.runBrewUninstall(b.Formula); err != nil {
+	if _, err := b.lookPath("brew"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: homebrew not found, skipping brew uninstall for %s\n", b.Formula)
+	} else if err := b.runBrewUninstall(b.Formula); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: brew uninstall %s failed: %v\n", b.Formula, err)
 	}
 	return removePluginBinary(name)
