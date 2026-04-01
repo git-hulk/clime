@@ -109,11 +109,11 @@ var pluginListCmd = &cobra.Command{
 				path = strings.Replace(path, home, "~", 1)
 			}
 			table.AddRow(
-				uicli.TruncateString(p.Name, nameWidth),
+				p.Name,
 				uicli.TruncateString(desc, descWidth),
-				uicli.TruncateString(version, versionWidth),
-				uicli.TruncateString(source, sourceWidth),
-				uicli.TruncateString(path, pathWidth),
+				version,
+				source,
+				path,
 			)
 		}
 		table.Println()
