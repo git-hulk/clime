@@ -178,6 +178,14 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("--npm, --brew, --repo, and --script are mutually exclusive")
 		}
 
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+		if err := ensureInstallNameAvailable(manifest, name); err != nil {
+			return err
+		}
+
 		inst, err := installer.FromPlugin(pluginInstall)
 		if err != nil {
 			return err
@@ -195,10 +203,6 @@ var pluginInstallCmd = &cobra.Command{
 			return fmt.Errorf("failed to install plugin %q: %w", name, err)
 		}
 
-		manifest, err := plugin.LoadManifest()
-		if err != nil {
-			manifest = &plugin.Manifest{}
-		}
 		manifest.Add(name, version, inst.PluginType(), inst.Source(), "")
 		if pluginInstall.Description != "" {
 			manifest.SetDescription(name, pluginInstall.Description)
@@ -484,4 +488,11 @@ func uniquePluginNames(args []string) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func ensureInstallNameAvailable(manifest *plugin.Manifest, name string) error {
+	if _, exists := manifest.Get(name); exists {
+		return fmt.Errorf("plugin %q already exists; use \"clime plugin update %s\" or uninstall it first", name, name)
+	}
+	return nil
 }
