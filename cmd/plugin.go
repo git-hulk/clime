@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/installer"
@@ -67,15 +66,52 @@ var pluginListCmd = &cobra.Command{
 		home, _ := os.UserHomeDir()
 
 		const descWidth = 60
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tDESCRIPTION\tVERSION\tSOURCE\tPATH")
-
+		headers := []string{"NAME", "DESCRIPTION", "VERSION", "SOURCE", "PATH"}
+		var rows [][]string
 		for _, p := range discovered {
 			name, desc, version, source, path := pluginListColumns(p, manifest, home, descWidth)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, desc, version, source, path)
+			rows = append(rows, []string{name, desc, version, source, path})
 		}
-		if err := w.Flush(); err != nil {
-			return fmt.Errorf("render plugin list: %w", err)
+
+		// Compute max width per column from headers and data.
+		colWidths := make([]int, len(headers))
+		for i, h := range headers {
+			colWidths[i] = len(h)
+		}
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > colWidths[i] {
+					colWidths[i] = len(cell)
+				}
+			}
+		}
+
+		const gap = 2
+		// Print bold headers.
+		for i, h := range headers {
+			if i > 0 {
+				fmt.Print(strings.Repeat(" ", gap))
+			}
+			fmt.Print(uicli.BoldColor.Sprintf("%-*s", colWidths[i], h))
+		}
+		fmt.Println()
+		// Print separator.
+		for i, w := range colWidths {
+			if i > 0 {
+				fmt.Print(strings.Repeat(" ", gap))
+			}
+			fmt.Print(strings.Repeat("-", w))
+		}
+		fmt.Println()
+		// Print data rows.
+		for _, row := range rows {
+			for i, cell := range row {
+				if i > 0 {
+					fmt.Print(strings.Repeat(" ", gap))
+				}
+				fmt.Printf("%-*s", colWidths[i], cell)
+			}
+			fmt.Println()
 		}
 		return nil
 	},
