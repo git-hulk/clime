@@ -38,7 +38,7 @@ clime plugin install account --script https://example.com/install.sh --binary-pa
 clime plugin install opencli --npm @jackwener/opencli
 
 # Install a plugin from Homebrew
-clime plugin install lint --brew myorg/tap/clime-lint
+clime plugin install golangci-lint --brew golangci-lint
 
 # Now use it — clime dispatches to the clime-<name> binary
 clime account login --user hulk
@@ -63,4 +63,4 @@ clime init                                  # built-in defaults
 clime init https://example.com/tools.yaml   # your team's plugin list
 ```
 
-Run `clime help` or `clime <command> --help` for full usage details.
+Run **clime help** or **clime <command> --help** for full usage details.
