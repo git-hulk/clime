@@ -213,46 +213,84 @@ var pluginInstallCmd = &cobra.Command{
 }
 
 var pluginUninstallCmd = &cobra.Command{
-	Use:     "uninstall <name>",
+	Use:     "uninstall <name...>",
 	Aliases: []string{"remove"},
-	Short:   "Uninstall an installed plugin",
-	Args:    cobra.ExactArgs(1),
+	Short:   "Uninstall one or more installed plugins",
+	Args:    cobra.MinimumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
+		already := make(map[string]struct{}, len(args))
+		for _, a := range args {
+			already[a] = struct{}{}
 		}
-		return completeInstalledPlugins(toComplete), cobra.ShellCompDirectiveNoFileComp
+		var filtered []string
+		for _, c := range completeInstalledPlugins(toComplete) {
+			name := strings.SplitN(c, "\t", 2)[0]
+			if _, ok := already[name]; !ok {
+				filtered = append(filtered, c)
+			}
+		}
+		return filtered, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		spinner := uicli.NewSpinner().
-			WithStyle(uicli.SpinnerDots).
-			WithColor(uicli.CyanColor).
-			WithMessage(fmt.Sprintf("Removing plugin %q...", name)).
-			Start()
-
 		manifest, err := plugin.LoadManifest()
 		if err != nil {
 			manifest = &plugin.Manifest{}
 		}
 
-		entry, _ := manifest.Get(name)
-		inst, err := installer.FromManifest(entry)
-		if err != nil {
-			// If we can't determine the installer type, just remove the binary directly
-			inst = installer.NewGitHubInstaller("")
-		}
-		if err := inst.Uninstall(name, entry); err != nil {
-			spinner.Error(fmt.Sprintf("Failed to remove plugin %q", name))
-			return fmt.Errorf("failed to remove plugin %q: %w", name, err)
+		names := uniquePluginNames(args)
+		if len(names) > 1 {
+			terminal.Infof("Removing %d plugins...", len(names))
+			fmt.Println()
 		}
 
-		manifest.Remove(name)
-		if err := manifest.Save(); err != nil {
-			return fmt.Errorf("plugin removed but failed to update manifest: %w", err)
+		var (
+			removed int
+			failed  []string
+		)
+
+		for _, name := range names {
+			spinner := uicli.NewSpinner().
+				WithStyle(uicli.SpinnerDots).
+				WithColor(uicli.CyanColor).
+				WithMessage(fmt.Sprintf("Removing plugin %q...", name)).
+				Start()
+
+			entry, _ := manifest.Get(name)
+			inst, err := installer.FromManifest(entry)
+			if err != nil {
+				// If we can't determine the installer type, just remove the binary directly.
+				inst = installer.NewGitHubInstaller("")
+			}
+			if err := inst.Uninstall(name, entry); err != nil {
+				spinner.Error(fmt.Sprintf("Failed to remove plugin %q", name))
+				failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
+				continue
+			}
+
+			manifest.Remove(name)
+			spinner.Success(fmt.Sprintf("Removed plugin %q", name))
+			removed++
 		}
 
-		spinner.Success(fmt.Sprintf("Removed plugin %q", name))
+		if removed > 0 {
+			if err := manifest.Save(); err != nil {
+				return fmt.Errorf("plugin(s) removed but failed to update manifest: %w", err)
+			}
+		}
+
+		if len(names) > 1 {
+			fmt.Println()
+			summary := uicli.GreenColor.Sprintf("%d removed", removed)
+			if len(failed) > 0 {
+				summary += ", " + uicli.RedColor.Sprintf("%d failed", len(failed))
+			}
+			fmt.Printf("  %s %s\n", uicli.BoldColor.Sprint("Summary:"), summary)
+		}
+
+		if len(failed) > 0 {
+			return fmt.Errorf("%d plugin(s) failed to remove:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
+		}
+
 		return nil
 	},
 }
@@ -433,4 +471,17 @@ func completeInstalledPlugins(toComplete string) []string {
 		}
 	}
 	return completions
+}
+
+func uniquePluginNames(args []string) []string {
+	seen := make(map[string]struct{}, len(args))
+	names := make([]string, 0, len(args))
+	for _, name := range args {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
 }
