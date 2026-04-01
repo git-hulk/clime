@@ -21,6 +21,7 @@ var (
 func init() {
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Repo, "repo", "", "GitHub repo (owner/name) to install from, overrides the default convention")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Npm, "npm", "", "npm package name to install globally")
+	pluginInstallCmd.Flags().StringVar(&pluginInstall.Brew, "brew", "", "Homebrew formula to install")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Script, "script", "", "URL of an install script to run (curl | sh)")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.BinaryPath, "binary-path", "", "path to the binary after the install script runs (required with --script)")
 	pluginInstallCmd.Flags().StringVar(&pluginInstall.Description, "description", "", "short description shown in help output")
@@ -122,8 +123,8 @@ var pluginListCmd = &cobra.Command{
 
 var pluginInstallCmd = &cobra.Command{
 	Use:   "install <name>",
-	Short: "Install a plugin from GitHub Releases, npm, or an install script",
-	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package, or --script to run a remote install script.",
+	Short: "Install a plugin from GitHub Releases, npm, Homebrew, or an install script",
+	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package, --brew to install from a Homebrew formula, or --script to run a remote install script.",
 	Args:  cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -138,6 +139,9 @@ var pluginInstallCmd = &cobra.Command{
 		if pluginInstall.Npm != "" {
 			sources++
 		}
+		if pluginInstall.Brew != "" {
+			sources++
+		}
 		if pluginInstall.Repo != "" {
 			sources++
 		}
@@ -145,7 +149,7 @@ var pluginInstallCmd = &cobra.Command{
 			sources++
 		}
 		if sources > 1 {
-			return fmt.Errorf("--npm, --repo, and --script are mutually exclusive")
+			return fmt.Errorf("--npm, --brew, --repo, and --script are mutually exclusive")
 		}
 
 		inst, err := installer.FromPlugin(pluginInstall)

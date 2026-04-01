@@ -61,6 +61,12 @@ func TestFromPlugin(t *testing.T) {
 			wantSource: "@acme/clime-bar",
 		},
 		{
+			name:       "brew formula",
+			plugin:     plugin.Plugin{Name: "tap", Brew: "acme/tap/clime-tap"},
+			wantType:   plugin.SourceTypeBrew,
+			wantSource: "acme/tap/clime-tap",
+		},
+		{
 			name:       "script",
 			plugin:     plugin.Plugin{Name: "baz", Script: "https://example.com/install.sh", BinaryPath: "/usr/local/bin/baz"},
 			wantType:   plugin.SourceTypeScript,
@@ -117,6 +123,12 @@ func TestFromManifest(t *testing.T) {
 			entry:      plugin.ManifestEntry{Name: "bar", Type: plugin.SourceTypeNpm, Source: "@acme/clime-bar"},
 			wantType:   plugin.SourceTypeNpm,
 			wantSource: "@acme/clime-bar",
+		},
+		{
+			name:       "brew",
+			entry:      plugin.ManifestEntry{Name: "tap", Type: plugin.SourceTypeBrew, Source: "acme/tap/clime-tap"},
+			wantType:   plugin.SourceTypeBrew,
+			wantSource: "acme/tap/clime-tap",
 		},
 		{
 			name:       "script",

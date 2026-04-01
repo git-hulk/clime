@@ -14,6 +14,7 @@ const (
 	SourceTypeGitHub = "github"
 	SourceTypeNpm    = "npm"
 	SourceTypeScript = "script"
+	SourceTypeBrew   = "brew"
 
 	// VersionLatest is the fallback version used when actual version
 	// detection is unavailable or fails.
@@ -82,6 +83,9 @@ func (m *Manifest) migrateRepo() bool {
 		case strings.HasPrefix(repo, "npm:"):
 			m.Plugins[i].Type = SourceTypeNpm
 			m.Plugins[i].Source = strings.TrimPrefix(repo, "npm:")
+		case strings.HasPrefix(repo, "brew:"):
+			m.Plugins[i].Type = SourceTypeBrew
+			m.Plugins[i].Source = strings.TrimPrefix(repo, "brew:")
 		case strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "http://"):
 			m.Plugins[i].Type = SourceTypeScript
 			m.Plugins[i].Source = repo

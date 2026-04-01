@@ -30,6 +30,12 @@ func TestMigrateRepo(t *testing.T) {
 			wantSource: "https://example.com/install.sh",
 		},
 		{
+			name:       "brew repo",
+			entry:      ManifestEntry{Name: "lint", Repo: "brew:acme/tap/clime-lint"},
+			wantType:   SourceTypeBrew,
+			wantSource: "acme/tap/clime-lint",
+		},
+		{
 			name:       "already migrated is not changed",
 			entry:      ManifestEntry{Name: "bar", Type: SourceTypeGitHub, Source: "acme/clime-bar"},
 			wantType:   SourceTypeGitHub,

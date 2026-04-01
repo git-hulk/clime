@@ -8,7 +8,7 @@ As more agents move from MCP servers to CLIs, it gets hard to track what's insta
 
 - **Unified entry point** — any `clime-<name>` binary becomes a `clime <name>` subcommand, no config needed
 - **Discover & manage** — list, install, update, and remove plugins with simple commands
-- **Multiple sources** — install plugins from GitHub Releases, npm, or custom scripts
+- **Multiple sources** — install plugins from GitHub Releases, npm, Homebrew, or custom scripts
 - **Team toolchains** — share a YAML manifest so everyone gets the same set of tools via `clime init`
 - **Self-updating** — keep both clime and its plugins up to date with one command
 
@@ -37,6 +37,9 @@ clime plugin install account --script https://example.com/install.sh --binary-pa
 # Install a plugin from npm
 clime plugin install opencli --npm @jackwener/opencli
 
+# Install a plugin from Homebrew
+clime plugin install lint --brew myorg/tap/clime-lint
+
 # Now use it — clime dispatches to the clime-<name> binary
 clime account login --user hulk
 clime account list
@@ -61,4 +64,3 @@ clime init https://example.com/tools.yaml   # your team's plugin list
 ```
 
 Run `clime help` or `clime <command> --help` for full usage details.
-
