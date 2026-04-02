@@ -11,8 +11,10 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:               "clime",
-	Short:             "Unified CLI for organization tools",
-	Long:              "clime is a unified command-line interface that discovers and dispatches to plugin CLIs (clime-<name> binaries on your PATH).",
+	Short:             "Unified CLI manager that lets you install, discover, and update CLI plugins from one place",
+	Long:              "As more agents move from MCP servers to CLIs, it gets hard to track what's installed and keep things up to date." +
+						"\nFor organizations with many internal tools, there's often no single place for employees to discover and download them."+
+						"\nclime solves these problems by providing a unified CLI manager that lets you install, discover, and update CLI plugins from one place.",
 	SilenceErrors:     true,
 	SilenceUsage:      true,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -25,6 +27,7 @@ var builtinCommands = map[string]bool{
 	"init":       true,
 	"help":       true,
 	"completion": true,
+	"skill":      true,
 }
 
 func Execute() error {

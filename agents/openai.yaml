@@ -1,0 +1,4 @@
+interface:
+  display_name: "clime CLI"
+  short_description: "Manage CLI plugins with clime"
+  default_prompt: "Help me discover, install, or update clime CLI plugins."
