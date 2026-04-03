@@ -63,4 +63,14 @@ clime init                                  # built-in defaults
 clime init https://example.com/tools.yaml   # your team's plugin list
 ```
 
+## AI Agent Skill
+
+clime ships with a built-in skill that AI agents (Claude Code, Codex, etc.) can use to discover and manage plugins on your behalf. Install it with:
+
+```sh
+clime install skill
+```
+
+This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/` so agents can automatically pick it up.
+
 Run **clime help** or **clime <command> --help** for full usage details.
