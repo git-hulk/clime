@@ -18,21 +18,17 @@ const skillDirName = "clime-cli"
 const skillFileName = "SKILL.md"
 
 func init() {
-	skillCmd.AddCommand(skillInstallCmd)
-	rootCmd.AddCommand(skillCmd)
+	installCmd.AddCommand(installSkillCmd)
+	rootCmd.AddCommand(installCmd)
 }
 
-var skillCmd = &cobra.Command{
-	Use:   "skill",
-	Short: "Display or install the clime skill for AI agents",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Print(SkillContent)
-		return nil
-	},
-}
-
-var skillInstallCmd = &cobra.Command{
+var installCmd = &cobra.Command{
 	Use:   "install",
+	Short: "Install clime components",
+}
+
+var installSkillCmd = &cobra.Command{
+	Use:   "skill",
 	Short: "Install the clime-cli skill into ~/.claude/skills and ~/.codex/skills",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
