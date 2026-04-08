@@ -331,6 +331,126 @@ func TestFetchRepoManifestFromMarketplaceJSON(t *testing.T) {
 	}
 }
 
+func TestFetchRepoManifestFromPluginJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	run("init")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test")
+
+	// Create .claude-plugin/plugin.json pointing to a skills directory.
+	pluginDir := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pluginJSON := `{"name": "test-plugin", "skills": "./.claude/skills"}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create two skill directories with SKILL.md files.
+	for _, name := range []string{"skill-x", "skill-y"} {
+		skillDir := filepath.Join(dir, ".claude", "skills", name)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + name + "\ndescription: " + name + " desc\n---\n# " + name
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run("add", "-A")
+	run("commit", "-m", "init")
+
+	manifest, err := FetchRepoManifest(dir)
+	if err != nil {
+		t.Fatalf("FetchRepoManifest failed: %v", err)
+	}
+	if len(manifest.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(manifest.Skills))
+	}
+
+	// Skills are returned in directory order; check both exist.
+	names := map[string]bool{}
+	for _, s := range manifest.Skills {
+		names[s.Name] = true
+	}
+	if !names["skill-x"] || !names["skill-y"] {
+		t.Fatalf("expected skill-x and skill-y, got %v", names)
+	}
+}
+
+func TestFetchRepoManifestPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
+	dir := t.TempDir()
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	run("init")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test")
+
+	pluginDir := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// marketplace.json with plugins that have no skills arrays (like pbakaus/impeccable).
+	mpJSON := `{"plugins": [{"name": "test", "description": "test plugin", "source": "./"}]}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "marketplace.json"), []byte(mpJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// plugin.json points to the skills directory.
+	pluginJSON := `{"name": "test", "skills": "./.claude/skills"}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a skill directory.
+	skillDir := filepath.Join(dir, ".claude", "skills", "my-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\ndescription: A skill\n---\n# My Skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run("add", "-A")
+	run("commit", "-m", "init")
+
+	manifest, err := FetchRepoManifest(dir)
+	if err != nil {
+		t.Fatalf("FetchRepoManifest failed: %v", err)
+	}
+	if len(manifest.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(manifest.Skills))
+	}
+	if manifest.Skills[0].Name != "my-skill" {
+		t.Fatalf("expected my-skill, got %s", manifest.Skills[0].Name)
+	}
+}
+
 func TestFetchRepoManifestEmptyNameFallback(t *testing.T) {
 	dir := t.TempDir()
 

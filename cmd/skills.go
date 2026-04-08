@@ -155,14 +155,20 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 	}
 
 	options := append(sources, newRepoOption)
+	showSourceSpacer := true
 	for {
-		fmt.Println()
+		if showSourceSpacer {
+			fmt.Println()
+		} else {
+			showSourceSpacer = true
+		}
 		idx, err := selectPrompt(prompt.SelectConfig{
 			Label:   "Select a skill source",
 			Options: options,
 		})
 		if err != nil {
 			if errors.Is(err, prompt.ErrBack) {
+				showSourceSpacer = false
 				continue
 			}
 			return err
@@ -177,10 +183,12 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 		}
 
 		repo := options[idx]
+		showActionSpacer := true
 		for {
-			action, err := pickSourceAction(repo)
+			action, err := pickSourceAction(repo, showActionSpacer)
 			if err != nil {
 				if errors.Is(err, prompt.ErrBack) {
+					showSourceSpacer = false
 					break
 				}
 				return err
@@ -188,6 +196,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 
 			err = skillsActionRunner(manifest, repo, action)
 			if errors.Is(err, prompt.ErrBack) {
+				showActionSpacer = false
 				continue
 			}
 			return err
@@ -196,13 +205,19 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 }
 
 func uniqueSkillSources(manifest *skill.Manifest) []string {
-	// Collect unique sources from installed skills, preserving order.
+	// Collect unique sources from installed skills and tracked sources, preserving order.
 	seen := make(map[string]bool)
 	var sources []string
 	for _, s := range manifest.Skills {
 		if s.Source != "" && !seen[s.Source] {
 			seen[s.Source] = true
 			sources = append(sources, s.Source)
+		}
+	}
+	for _, s := range manifest.Sources {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			sources = append(sources, s)
 		}
 	}
 
@@ -239,14 +254,16 @@ func validateSkillRepoSource(repo string) error {
 	return nil
 }
 
-func pickSourceAction(repo string) (sourceAction, error) {
+func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 	options := []string{
 		"Browse and install skills",
 		"Update installed skills",
 		"Remove source and its installed skills",
 	}
 
-	fmt.Println()
+	if showSpacer {
+		fmt.Println()
+	}
 	idx, err := selectPrompt(prompt.SelectConfig{
 		Label:   fmt.Sprintf("Action for %s", repo),
 		Options: options,
@@ -265,7 +282,7 @@ func pickSourceAction(repo string) (sourceAction, error) {
 	}
 }
 
-// removeSource uninstalls all skills from the given source and removes them from the manifest.
+// removeSource uninstalls all skills from the given source and removes it from the manifest.
 func removeSource(manifest *skill.Manifest, repo string) error {
 	var names []string
 	for _, s := range manifest.Skills {
@@ -274,16 +291,20 @@ func removeSource(manifest *skill.Manifest, repo string) error {
 		}
 	}
 
-	if len(names) == 0 {
-		terminal.Warningf("No skills installed from %s.", repo)
-		return nil
-	}
-
 	fmt.Println()
 	for _, name := range names {
 		if err := uninstallByName(manifest, name); err != nil {
 			terminal.Errorf("Failed to uninstall %q: %v", name, err)
 		}
+	}
+
+	manifest.RemoveSource(repo)
+	if err := manifest.Save(); err != nil {
+		return fmt.Errorf("failed to update manifest: %w", err)
+	}
+
+	if len(names) == 0 {
+		terminal.Successf("Removed source %s.", repo)
 	}
 	return nil
 }
@@ -383,6 +404,12 @@ func installFromRepo(manifest *skill.Manifest, repo string) error {
 	}
 
 	spinner.Success(fmt.Sprintf("Found %d skill(s) in %q", len(repoManifest.Skills), repo))
+
+	// Record the source so it appears in future interactive menus.
+	manifest.AddSource(repo)
+	if err := manifest.Save(); err != nil {
+		return fmt.Errorf("failed to save skill source: %w", err)
+	}
 
 	// Filter out already-installed skills.
 	type candidate struct {
@@ -504,14 +531,20 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 		options[i] = label
 	}
 
+	showSpacer := true
 	for {
-		fmt.Println()
+		if showSpacer {
+			fmt.Println()
+		} else {
+			showSpacer = true
+		}
 		selectedIdxs, err := multiSelectPrompt(prompt.SelectConfig{
 			Label:   "Select skills to uninstall (space to toggle, enter to confirm)",
 			Options: options,
 		})
 		if err != nil {
 			if errors.Is(err, prompt.ErrBack) {
+				showSpacer = false
 				continue
 			}
 			return err

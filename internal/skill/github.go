@@ -219,11 +219,21 @@ func fetchRepoManifestWithGH(repo string) (*RepoManifest, error) {
 		}
 	}
 
-	data, err := fetchGitHubFileWithGH(repo, ".claude-plugin/marketplace.json")
-	if err != nil {
-		return nil, fmt.Errorf("no skills manifest found in %s via gh CLI", repo)
+	// Try marketplace.json.
+	if data, err := fetchGitHubFileWithGH(repo, ".claude-plugin/marketplace.json"); err == nil {
+		if manifest, err := parseMarketplaceData(repo, data, fetchGitHubFileWithGH); err == nil && len(manifest.Skills) > 0 {
+			return manifest, nil
+		}
 	}
-	return parseMarketplaceData(repo, data, fetchGitHubFileWithGH)
+
+	// Fall back to plugin.json.
+	if data, err := fetchGitHubFileWithGH(repo, ".claude-plugin/plugin.json"); err == nil {
+		if manifest, err := parsePluginData(repo, data, fetchGitHubFileWithGH); err == nil && len(manifest.Skills) > 0 {
+			return manifest, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no skills manifest found in %s via gh CLI", repo)
 }
 
 // fetchRepoManifestFromAPI fetches the manifest using the GitHub Contents API.
@@ -248,17 +258,27 @@ func fetchRepoManifestFromAPI(repo string) (*RepoManifest, error) {
 	}
 
 	// Fall back to .claude-plugin/marketplace.json.
-	data, err := fetchGitHubFile(repo, ".claude-plugin/marketplace.json")
-	if err != nil {
-		if isNon404HTTPError(err) {
-			hasAPIError = true
+	if data, err := fetchGitHubFile(repo, ".claude-plugin/marketplace.json"); err == nil {
+		if manifest, err := parseMarketplaceData(repo, data, fetchGitHubFile); err == nil && len(manifest.Skills) > 0 {
+			return manifest, nil
 		}
-		if hasAPIError {
-			return nil, fmt.Errorf("%w for %s: consider setting GITHUB_TOKEN", errAPIUnavailable, repo)
-		}
-		return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, and .claude-plugin/marketplace.json", repo)
+	} else if isNon404HTTPError(err) {
+		hasAPIError = true
 	}
-	return parseMarketplaceData(repo, data, fetchGitHubFile)
+
+	// Fall back to .claude-plugin/plugin.json.
+	if data, err := fetchGitHubFile(repo, ".claude-plugin/plugin.json"); err == nil {
+		if manifest, err := parsePluginData(repo, data, fetchGitHubFile); err == nil && len(manifest.Skills) > 0 {
+			return manifest, nil
+		}
+	} else if isNon404HTTPError(err) {
+		hasAPIError = true
+	}
+
+	if hasAPIError {
+		return nil, fmt.Errorf("%w for %s: consider setting GITHUB_TOKEN", errAPIUnavailable, repo)
+	}
+	return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json", repo)
 }
 
 // isNon404HTTPError returns true if the error is an HTTP error with a status code
@@ -298,11 +318,16 @@ func readRepoManifestFromDir(dir, repo string) (*RepoManifest, error) {
 	}
 
 	// Fall back to .claude-plugin/marketplace.json.
-	manifest, err := parseMarketplaceManifest(dir)
-	if err != nil {
-		return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, and .claude-plugin/marketplace.json", repo)
+	if manifest, err := parseMarketplaceManifest(dir); err == nil && len(manifest.Skills) > 0 {
+		return manifest, nil
 	}
-	return manifest, nil
+
+	// Fall back to .claude-plugin/plugin.json.
+	if manifest, err := parsePluginManifest(dir); err == nil && len(manifest.Skills) > 0 {
+		return manifest, nil
+	}
+
+	return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json", repo)
 }
 
 // marketplaceFile represents the .claude-plugin/marketplace.json format.
@@ -392,6 +417,104 @@ func parseMarketplaceData(repo string, data []byte, fetch fileFetcher) (*RepoMan
 			}
 			manifest.Skills = append(manifest.Skills, entry)
 		}
+	}
+	return &manifest, nil
+}
+
+// pluginFile represents the .claude-plugin/plugin.json format.
+type pluginFile struct {
+	Name   string `json:"name"`
+	Skills string `json:"skills"`
+}
+
+// ghDirEntry represents a single entry in a GitHub directory listing.
+type ghDirEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// parsePluginManifest reads .claude-plugin/plugin.json from a local directory
+// and discovers skills by scanning the skills directory it references.
+func parsePluginManifest(dir string) (*RepoManifest, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		return nil, err
+	}
+
+	var pf pluginFile
+	if err := json.Unmarshal(data, &pf); err != nil {
+		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
+	}
+	if pf.Skills == "" {
+		return nil, fmt.Errorf("plugin.json has no skills directory")
+	}
+
+	skillsDir := strings.TrimPrefix(pf.Skills, "./")
+	entries, err := os.ReadDir(filepath.Join(dir, skillsDir))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read skills directory: %w", err)
+	}
+
+	var manifest RepoManifest
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		skillPath := filepath.Join(skillsDir, e.Name())
+		entry := SkillEntry{Path: skillPath}
+		if fm, err := readSkillFrontmatter(filepath.Join(dir, skillPath, "SKILL.md")); err == nil {
+			entry.Name = fm.Name
+			entry.Description = fm.Description
+		}
+		if entry.Name == "" {
+			entry.Name = e.Name()
+		}
+		manifest.Skills = append(manifest.Skills, entry)
+	}
+	return &manifest, nil
+}
+
+// parsePluginData parses plugin.json data and discovers skills by listing the
+// skills directory via the provided fetch function.
+func parsePluginData(repo string, data []byte, fetch fileFetcher) (*RepoManifest, error) {
+	var pf pluginFile
+	if err := json.Unmarshal(data, &pf); err != nil {
+		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
+	}
+	if pf.Skills == "" {
+		return nil, fmt.Errorf("plugin.json has no skills directory")
+	}
+
+	skillsDir := strings.TrimPrefix(pf.Skills, "./")
+
+	// List the skills directory contents via the GitHub contents API.
+	listData, err := fetch(repo, skillsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list skills directory: %w", err)
+	}
+
+	var dirEntries []ghDirEntry
+	if err := json.Unmarshal(listData, &dirEntries); err != nil {
+		return nil, fmt.Errorf("failed to parse directory listing: %w", err)
+	}
+
+	var manifest RepoManifest
+	for _, de := range dirEntries {
+		if de.Type != "dir" {
+			continue
+		}
+		skillPath := filepath.Join(skillsDir, de.Name)
+		entry := SkillEntry{Path: skillPath}
+		if fmData, err := fetch(repo, skillPath+"/SKILL.md"); err == nil {
+			if fm, err := parseSkillFrontmatter(fmData); err == nil {
+				entry.Name = fm.Name
+				entry.Description = fm.Description
+			}
+		}
+		if entry.Name == "" {
+			entry.Name = de.Name
+		}
+		manifest.Skills = append(manifest.Skills, entry)
 	}
 	return &manifest, nil
 }

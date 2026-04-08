@@ -25,6 +25,7 @@ git clone https://github.com/git-hulk/clime.git && cd clime && make install
 ```
 
 The install script detects your OS (macOS / Linux) and architecture (amd64 / arm64) automatically.
+By default it installs `clime` to `~/.local/bin` and updates your shell profile if that directory is not already on `PATH`.
 
 ## How It Works
 

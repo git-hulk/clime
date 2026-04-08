@@ -18,9 +18,10 @@ type InstalledSkill struct {
 	InstalledAt time.Time `yaml:"installed_at"`
 }
 
-// Manifest holds installed skills.
+// Manifest holds installed skills and known sources.
 type Manifest struct {
-	Skills []InstalledSkill `yaml:"skills"`
+	Skills  []InstalledSkill `yaml:"skills"`
+	Sources []string         `yaml:"sources,omitempty"`
 }
 
 func manifestPath() (string, error) {
@@ -102,4 +103,25 @@ func (m *Manifest) GetSkill(name string) (InstalledSkill, bool) {
 		}
 	}
 	return InstalledSkill{}, false
+}
+
+// AddSource adds a source to the known sources list if not already present.
+func (m *Manifest) AddSource(source string) {
+	for _, s := range m.Sources {
+		if s == source {
+			return
+		}
+	}
+	m.Sources = append(m.Sources, source)
+}
+
+// RemoveSource removes a source from the known sources list.
+func (m *Manifest) RemoveSource(source string) bool {
+	for i, s := range m.Sources {
+		if s == source {
+			m.Sources = append(m.Sources[:i], m.Sources[i+1:]...)
+			return true
+		}
+	}
+	return false
 }

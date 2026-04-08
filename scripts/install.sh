@@ -43,7 +43,7 @@ if [ -z "$INSTALL_DIR" ]; then
     if [ -n "$PLUGIN" ]; then
         INSTALL_DIR="${HOME}/.clime/plugins"
     else
-        INSTALL_DIR="${HOME}/.clime/bin"
+        INSTALL_DIR="${HOME}/.local/bin"
     fi
 fi
 
