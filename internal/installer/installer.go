@@ -79,14 +79,50 @@ func FromManifest(entry plugin.ManifestEntry) (Installer, error) {
 
 // removePluginBinary removes the plugin binary or symlink from the plugin directory.
 func removePluginBinary(name string) error {
+	return removePluginBinaryWithResolvedTarget(name, false)
+}
+
+// removePluginBinaryAndTarget removes the managed plugin binary/symlink and, if
+// the managed path is a symlink, also removes the resolved target binary.
+func removePluginBinaryAndTarget(name string) error {
+	return removePluginBinaryWithResolvedTarget(name, true)
+}
+
+func removePluginBinaryWithResolvedTarget(name string, removeTarget bool) error {
 	installDir, err := plugin.PluginBinDir()
 	if err != nil {
 		return err
 	}
+
 	binPath := filepath.Join(installDir, plugin.BinPrefix+name)
+	targetPath := ""
+
+	if removeTarget {
+		info, err := os.Lstat(binPath)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			targetPath, err = os.Readlink(binPath)
+			if err != nil {
+				return fmt.Errorf("failed to resolve plugin binary symlink: %w", err)
+			}
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(filepath.Dir(binPath), targetPath)
+			}
+			targetPath = filepath.Clean(targetPath)
+		} else if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to inspect plugin binary: %w", err)
+		}
+	}
+
 	if err := os.Remove(binPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plugin binary: %w", err)
 	}
+
+	if removeTarget && targetPath != "" {
+		if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove plugin target binary: %w", err)
+		}
+	}
+
 	return nil
 }
 

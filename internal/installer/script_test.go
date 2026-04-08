@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/git-hulk/clime/internal/plugin"
 )
@@ -255,6 +256,104 @@ func TestRunPluginVersionCmdAllFail(t *testing.T) {
 	_, err := runPluginVersionCmd(script)
 	if err == nil {
 		t.Fatal("runPluginVersionCmd() should fail when all commands fail")
+	}
+}
+
+func TestScriptInstallerUninstallRemovesSymlinkTarget(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	pluginsDir := filepath.Join(home, ".clime", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatalf("create plugins dir: %v", err)
+	}
+
+	targetBin := filepath.Join(t.TempDir(), "account")
+	if err := os.WriteFile(targetBin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write target binary: %v", err)
+	}
+
+	name := fmt.Sprintf("script-rmtest-%d", time.Now().UnixNano())
+	linkPath := filepath.Join(pluginsDir, "clime-"+name)
+	if err := os.Symlink(targetBin, linkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(linkPath)
+		_ = os.Remove(targetBin)
+	})
+
+	s := NewScriptInstaller("https://example.com/install.sh", "")
+	entry := plugin.ManifestEntry{
+		Name:   name,
+		Type:   plugin.SourceTypeScript,
+		Source: "https://example.com/install.sh",
+	}
+	if err := s.Uninstall(name, entry); err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatal("plugin symlink should have been removed")
+	}
+	if _, err := os.Stat(targetBin); !os.IsNotExist(err) {
+		t.Fatal("resolved target binary should have been removed")
+	}
+}
+
+func TestScriptInstallerUninstallRemovesRelativeSymlinkTarget(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	pluginsDir := filepath.Join(home, ".clime", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatalf("create plugins dir: %v", err)
+	}
+
+	targetDir := filepath.Join(pluginsDir, fmt.Sprintf(".script-target-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	targetBin := filepath.Join(targetDir, "tool")
+	if err := os.WriteFile(targetBin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write target binary: %v", err)
+	}
+
+	name := fmt.Sprintf("script-rmtest-rel-%d", time.Now().UnixNano())
+	linkPath := filepath.Join(pluginsDir, "clime-"+name)
+	relTarget, err := filepath.Rel(pluginsDir, targetBin)
+	if err != nil {
+		t.Fatalf("compute relative target path: %v", err)
+	}
+	if err := os.Symlink(relTarget, linkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(linkPath)
+		_ = os.RemoveAll(targetDir)
+	})
+
+	s := NewScriptInstaller("https://example.com/install.sh", "")
+	entry := plugin.ManifestEntry{
+		Name:   name,
+		Type:   plugin.SourceTypeScript,
+		Source: "https://example.com/install.sh",
+	}
+	if err := s.Uninstall(name, entry); err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatal("plugin symlink should have been removed")
+	}
+	if _, err := os.Stat(targetBin); !os.IsNotExist(err) {
+		t.Fatal("resolved relative target binary should have been removed")
 	}
 }
 

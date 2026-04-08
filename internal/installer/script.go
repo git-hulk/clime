@@ -107,7 +107,7 @@ func (s *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 }
 
 func (s *ScriptInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
-	return removePluginBinary(name)
+	return removePluginBinaryAndTarget(name)
 }
 
 func (s *ScriptInstaller) DetectVersion(name string) string {
