@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestUniquePluginNames(t *testing.T) {
 	t.Parallel()
@@ -35,5 +38,22 @@ func TestPluginUninstallArgsAllowsMultiple(t *testing.T) {
 	}
 	if err := pluginUninstallCmd.Args(pluginUninstallCmd, nil); err == nil {
 		t.Fatal("zero args should fail")
+	}
+}
+
+func TestPluginUninstallWarnsWhenPluginDoesNotExist(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	output := captureStdout(t, func() {
+		if err := pluginUninstallCmd.RunE(pluginUninstallCmd, []string{"missing-plugin"}); err != nil {
+			t.Fatalf("pluginUninstallCmd.RunE() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(output, `Plugin "missing-plugin" is not installed; skipping.`) {
+		t.Fatalf("stdout = %q, want missing-plugin warning", output)
+	}
+	if strings.Contains(output, `Removed plugin "missing-plugin"`) {
+		t.Fatalf("stdout = %q, should not report plugin removal", output)
 	}
 }

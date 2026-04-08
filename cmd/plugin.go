@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -253,13 +254,18 @@ var pluginUninstallCmd = &cobra.Command{
 		)
 
 		for _, name := range names {
+			entry, exists := manifest.Get(name)
+			if !exists && !managedPluginBinaryExists(name) {
+				terminal.Warningf("Plugin %q is not installed; skipping.", name)
+				continue
+			}
+
 			spinner := uicli.NewSpinner().
 				WithStyle(uicli.SpinnerDots).
 				WithColor(uicli.CyanColor).
 				WithMessage(fmt.Sprintf("Removing plugin %q...", name)).
 				Start()
 
-			entry, _ := manifest.Get(name)
 			inst, err := installer.FromManifest(entry)
 			if err != nil {
 				// If we can't determine the installer type, just remove the binary directly.
@@ -488,6 +494,20 @@ func uniquePluginNames(args []string) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func managedPluginBinaryExists(name string) bool {
+	dir, err := plugin.PluginBinDir()
+	if err != nil {
+		return false
+	}
+
+	path := filepath.Join(dir, plugin.BinPrefix+name)
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
 
 func ensureInstallNameAvailable(manifest *plugin.Manifest, name string) error {
