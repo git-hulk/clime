@@ -28,6 +28,7 @@ var builtinCommands = map[string]bool{
 	"help":       true,
 	"completion": true,
 	"install":    true,
+	"skills":     true,
 }
 
 func Execute() error {

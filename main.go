@@ -2,9 +2,11 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"os"
 
 	"github.com/git-hulk/clime/cmd"
+	"github.com/git-hulk/clime/internal/prompt"
 	"github.com/git-hulk/clime/internal/version"
 )
 
@@ -29,6 +31,9 @@ func main() {
 	cmd.AgentYAML = agentYAML
 
 	if err := cmd.Execute(); err != nil {
+		if errors.Is(err, prompt.ErrInterrupted) {
+			os.Exit(130)
+		}
 		terminal.Errorf("Error: %v", err)
 		os.Exit(1)
 	}
