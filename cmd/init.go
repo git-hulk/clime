@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/installer"
@@ -43,17 +44,37 @@ Otherwise, the built-in default plugin list is used.`,
 			return nil
 		}
 
-		terminal.Infof("Installing %d default plugin(s)...", len(plugins))
-		fmt.Println()
-
 		manifest, err := plugin.LoadManifest()
 		if err != nil {
 			manifest = &plugin.Manifest{}
 		}
 
+		// Filter out already-installed plugins.
+		var missing []plugin.Plugin
+		var skipped []string
+		for _, p := range plugins {
+			if _, exists := manifest.Get(p.Name); exists {
+				skipped = append(skipped, p.Name)
+			} else {
+				missing = append(missing, p)
+			}
+		}
+
+		if len(skipped) > 0 {
+			terminal.Infof("Skipping %d already installed plugin(s): %s", len(skipped), formatNames(skipped))
+		}
+
+		if len(missing) == 0 {
+			terminal.Success("All plugins are already installed.")
+			return nil
+		}
+
+		terminal.Infof("Installing %d missing plugin(s)...", len(missing))
+		fmt.Println()
+
 		var failed []string
 
-		for _, p := range plugins {
+		for _, p := range missing {
 			spinner := uicli.NewSpinner().
 				WithStyle(uicli.SpinnerDots).
 				WithColor(uicli.CyanColor).
@@ -96,9 +117,14 @@ Otherwise, the built-in default plugin list is used.`,
 		}
 
 		fmt.Println()
-		terminal.Successf("All %d plugins installed!", len(plugins))
+		terminal.Successf("All %d plugins installed!", len(missing))
 		return nil
 	},
+}
+
+// formatNames joins a slice of names into a comma-separated string.
+func formatNames(names []string) string {
+	return strings.Join(names, ", ")
 }
 
 // isURL returns true if the given string looks like an HTTP(S) URL.
