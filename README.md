@@ -32,6 +32,10 @@ By default it installs `clime` to `~/.local/bin` and updates your shell profile 
 Install a plugin, then use it as a subcommand — clime forwards all arguments to the underlying binary:
 
 ```sh
+# Install a plugin from GitHub Releases (default — looks for git-hulk/clime-<name>)
+clime plugin install mytools
+clime plugin install mytools --repo owner/repo   # custom GitHub repo
+
 # Install a plugin via a custom install script
 clime plugin install account --script https://example.com/install.sh --binary-path ~/.local/bin/clime-account
 
@@ -40,6 +44,9 @@ clime plugin install opencli --npm @jackwener/opencli
 
 # Install a plugin from Homebrew
 clime plugin install golangci-lint --brew golangci-lint
+
+# Interactive mode — wizard prompts for name, source, and details
+clime plugin install
 
 # Now use it — clime dispatches to the clime-<name> binary
 clime account login --user hulk
@@ -64,14 +71,40 @@ clime init                                  # built-in defaults
 clime init https://example.com/tools.yaml   # your team's plugin list
 ```
 
-## AI Agent Skill
+## AI Agent Skills
 
-clime ships with a built-in skill that AI agents (Claude Code, Codex, etc.) can use to discover and manage plugins on your behalf. Install it with:
+clime can manage AI agent skills for Claude Code and Codex.
+
+### Built-in skill
+
+Install the bundled clime-cli skill so agents can discover and manage plugins on your behalf:
 
 ```sh
 clime install skill
 ```
 
-This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/` so agents can automatically pick it up.
+This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/`.
+
+### Skills from repositories
+
+Install, list, and uninstall skills from GitHub repositories or local paths:
+
+```sh
+clime skills install owner/repo    # browse and install skills from a repo
+clime skills install /local/path   # install from a local directory
+clime skills install               # interactive mode — pick a source and skills
+clime skills list                  # list installed skills
+clime skills uninstall <name>      # remove a skill
+```
+
+## Shell Completions
+
+Generate shell completion scripts for bash, zsh, fish, or PowerShell:
+
+```sh
+clime completion install           # auto-detect shell and install completions
+clime completion bash              # output bash completion script
+clime completion zsh               # output zsh completion script
+```
 
 Run **clime help** or **clime <command> --help** for full usage details.

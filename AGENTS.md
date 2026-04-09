@@ -1,12 +1,15 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `main.go`: CLI entrypoint; injects build metadata into `internal/version`.
-- `cmd/`: Cobra commands (`root`, `version`, `plugin`, `init`, `update`).
+- `main.go`: CLI entrypoint; embeds `SKILL.md` and `agents/openai.yaml`, injects build metadata into `internal/version`.
+- `cmd/`: Cobra commands (`root`, `version`, `plugin`, `init`, `update`, `completion`, `install skill`, `skills`).
 - `internal/`: non-exported packages:
-  - `plugin/` for plugin discovery/install/exec + manifest handling.
+  - `plugin/` for plugin discovery/exec + manifest handling (`~/.clime/plugins.yaml`).
+  - `installer/` for plugin install/update/uninstall across sources (GitHub, npm, Homebrew, script).
+  - `skill/` for AI agent skill install/uninstall + manifest handling (`~/.clime/skills.yaml`).
   - `selfupdate/` for CLI self-update flow.
   - `githubrelease/` shared GitHub release fetch/extract helpers.
+  - `prompt/` for interactive terminal prompts (select, input, multiselect).
   - `version/` build/version string formatting.
 - `scripts/install.sh`: installer used for release-based bootstrap.
 - `.github/workflows/`: CI (`go vet`, `go test`, `go build`) and tagged release via GoReleaser.
@@ -20,7 +23,7 @@
 - Quick local run: `go run . version` or `go run . update --help`.
 
 ## Coding Style & Naming Conventions
-- Language: Go (`go 1.26.x` per `go.mod`).
+- Language: Go (`go 1.25` per `go.mod`).
 - Formatting: always run `gofmt -w` on changed Go files.
 - Keep packages small and single-purpose under `internal/`.
 - File and package names should be lowercase; command files in `cmd/` should map to subcommands (for example, `update.go` -> `clime update`).

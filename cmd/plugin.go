@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,13 +11,15 @@ import (
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/installer"
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/git-hulk/clime/internal/prompt"
 	"github.com/spf13/cobra"
 )
 
 var (
-	pluginInstall     plugin.Plugin
-	pluginUpdateRepo  string
-	pluginUpdateForce bool
+	pluginInstall       plugin.Plugin
+	pluginUpdateRepo    string
+	pluginUpdateForce   bool
+	pluginInstallRunner = executePluginInstall
 )
 
 func init() {
@@ -149,10 +152,10 @@ func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, hom
 }
 
 var pluginInstallCmd = &cobra.Command{
-	Use:   "install <name>",
+	Use:   "install [name]",
 	Short: "Install a plugin from GitHub Releases, npm, Homebrew, or an install script",
-	Long:  "Downloads and installs a plugin. By default, looks for git-hulk/clime-<name> on GitHub. Use --npm to install from an npm package, --brew to install from a Homebrew formula, or --script to run a remote install script.",
-	Args:  cobra.ExactArgs(1),
+	Long:  "Downloads and installs a plugin. Run without arguments for an interactive wizard. With a name argument, looks for git-hulk/clime-<name> on GitHub by default. Use --npm, --brew, --repo, or --script to specify an alternative source.",
+	Args:  cobra.MaximumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
@@ -160,6 +163,14 @@ var pluginInstallCmd = &cobra.Command{
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			if pluginInstall.Npm != "" || pluginInstall.Brew != "" ||
+				pluginInstall.Repo != "" || pluginInstall.Script != "" {
+				return fmt.Errorf("plugin name argument is required when using --npm, --brew, --repo, or --script flags")
+			}
+			return runInteractivePluginInstall()
+		}
+
 		name := args[0]
 
 		sources := 0
@@ -187,34 +198,147 @@ var pluginInstallCmd = &cobra.Command{
 			return err
 		}
 
-		inst, err := installer.FromPlugin(pluginInstall)
+		pluginInstall.Name = name
+		return pluginInstallRunner(manifest, name, pluginInstall)
+	},
+}
+
+func runInteractivePluginInstall() error {
+	// Step 1: Enter plugin name.
+	fmt.Println()
+	name, err := inputPrompt("Enter plugin name")
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("plugin name cannot be empty")
+	}
+
+	manifest, err := plugin.LoadManifest()
+	if err != nil {
+		manifest = &plugin.Manifest{}
+	}
+	if err := ensureInstallNameAvailable(manifest, name); err != nil {
+		return err
+	}
+
+	// Step 2: Select install type.
+	installTypes := []string{
+		"Script (curl | sh)",
+		"npm (global package)",
+		"Homebrew (formula)",
+		"GitHub Release",
+	}
+
+	fmt.Println()
+	typeIdx, err := selectPrompt(prompt.SelectConfig{
+		Label:   "Select install type",
+		Options: installTypes,
+	})
+	if err != nil {
+		if errors.Is(err, prompt.ErrBack) {
+			terminal.Info("Installation cancelled.")
+			return nil
+		}
+		return err
+	}
+
+	// Step 3: Collect source details based on install type.
+	var p plugin.Plugin
+	p.Name = name
+
+	fmt.Println()
+	switch typeIdx {
+	case 0: // Script
+		url, err := inputPrompt("Enter install script URL")
 		if err != nil {
 			return err
 		}
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return fmt.Errorf("script URL cannot be empty")
+		}
+		p.Script = url
 
-		spinner := uicli.NewSpinner().
-			WithStyle(uicli.SpinnerDots).
-			WithColor(uicli.CyanColor).
-			WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
-			Start()
-
-		version, err := inst.Install(name)
+		binPath, err := inputPrompt("Enter binary path after install (leave empty to auto-detect)")
 		if err != nil {
-			spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
-			return fmt.Errorf("failed to install plugin %q: %w", name, err)
+			return err
 		}
+		p.BinaryPath = strings.TrimSpace(binPath)
 
-		manifest.Add(name, version, inst.PluginType(), inst.Source(), "")
-		if pluginInstall.Description != "" {
-			manifest.SetDescription(name, pluginInstall.Description)
+	case 1: // npm
+		pkg, err := inputPrompt("Enter npm package name")
+		if err != nil {
+			return err
 		}
-		if err := manifest.Save(); err != nil {
-			return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" {
+			return fmt.Errorf("npm package name cannot be empty")
 		}
+		p.Npm = pkg
 
-		spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
-		return nil
-	},
+	case 2: // Homebrew
+		formula, err := inputPrompt("Enter Homebrew formula")
+		if err != nil {
+			return err
+		}
+		formula = strings.TrimSpace(formula)
+		if formula == "" {
+			return fmt.Errorf("Homebrew formula cannot be empty")
+		}
+		p.Brew = formula
+
+	case 3: // GitHub Release
+		repo, err := inputPrompt("Enter GitHub repository (owner/repo)")
+		if err != nil {
+			return err
+		}
+		repo = strings.TrimSpace(repo)
+		if repo == "" {
+			return fmt.Errorf("GitHub repository cannot be empty")
+		}
+		p.Repo = repo
+	}
+
+	// Step 4: Optional description.
+	desc, err := inputPrompt("Enter description (leave empty to skip)")
+	if err != nil {
+		return err
+	}
+	p.Description = strings.TrimSpace(desc)
+
+	return pluginInstallRunner(manifest, name, p)
+}
+
+func executePluginInstall(manifest *plugin.Manifest, name string, p plugin.Plugin) error {
+	inst, err := installer.FromPlugin(p)
+	if err != nil {
+		return err
+	}
+
+	spinner := uicli.NewSpinner().
+		WithStyle(uicli.SpinnerDots).
+		WithColor(uicli.CyanColor).
+		WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
+		Start()
+
+	version, err := inst.Install(name)
+	if err != nil {
+		spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
+		return fmt.Errorf("failed to install plugin %q: %w", name, err)
+	}
+
+	manifest.Add(name, version, inst.PluginType(), inst.Source(), p.BinaryPath)
+	if p.Description != "" {
+		manifest.SetDescription(name, p.Description)
+	}
+	if err := manifest.Save(); err != nil {
+		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
+	}
+
+	spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
+	return nil
 }
 
 var pluginUninstallCmd = &cobra.Command{
