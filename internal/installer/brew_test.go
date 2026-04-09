@@ -112,6 +112,60 @@ func TestBrewInstallerInstallBrewInstallFails(t *testing.T) {
 	}
 }
 
+func TestBrewInstallerInstallUsesExistingBinaryWhenBrewInstallFails(t *testing.T) {
+	t.Parallel()
+
+	pluginDir := t.TempDir()
+	brewBin := t.TempDir()
+	installedBin := filepath.Join(brewBin, "copilot")
+	if err := os.WriteFile(installedBin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("write installed binary: %v", err)
+	}
+
+	b := &BrewInstaller{
+		Formula: "copilot-cli",
+		lookPath: func(name string) (string, error) {
+			switch name {
+			case "brew":
+				return "/opt/homebrew/bin/brew", nil
+			case "copilot":
+				return installedBin, nil
+			default:
+				return "", fmt.Errorf("not found")
+			}
+		},
+		runBrewInstall: func(formula string) error {
+			return fmt.Errorf("brew install failed: not writable")
+		},
+		brewBinDir: func() (string, error) {
+			return brewBin, nil
+		},
+		pluginBinDir: func() (string, error) {
+			return pluginDir, nil
+		},
+		getVersion: func(formula string) (string, error) {
+			return "1.0.0", nil
+		},
+	}
+
+	version, err := b.Install("copilot-cli")
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if version != "1.0.0" {
+		t.Fatalf("version = %q, want %q", version, "1.0.0")
+	}
+
+	linkPath := filepath.Join(pluginDir, "clime-copilot-cli")
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("symlink not created: %v", err)
+	}
+	if target != installedBin {
+		t.Fatalf("symlink target = %q, want %q", target, installedBin)
+	}
+}
+
 func TestBrewInstallerInstallBinaryNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -409,6 +463,41 @@ func TestBrewInstallerPluginType(t *testing.T) {
 	}
 }
 
+func TestBrewInstallOrUpgradeCmd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		action  string
+		formula string
+	}{
+		{name: "install", action: "install", formula: "acme/tap/clime-deploy"},
+		{name: "upgrade", action: "upgrade", formula: "acme/tap/clime-deploy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := brewInstallOrUpgradeCmd(tt.action, tt.formula)
+			if len(cmd.Args) != 3 || cmd.Args[0] != "brew" || cmd.Args[1] != tt.action || cmd.Args[2] != tt.formula {
+				t.Fatalf("cmd args = %v, want [brew %s %s]", cmd.Args, tt.action, tt.formula)
+			}
+
+			foundNoCleanup := false
+			for _, env := range cmd.Env {
+				if env == "HOMEBREW_NO_INSTALL_CLEANUP=1" {
+					foundNoCleanup = true
+					break
+				}
+			}
+			if !foundNoCleanup {
+				t.Fatal("expected HOMEBREW_NO_INSTALL_CLEANUP=1 to be set")
+			}
+		})
+	}
+}
+
 func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 	t.Parallel()
 
@@ -473,6 +562,27 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 		}
 	})
 
+	t.Run("lookPath with -cli suffix trimmed", func(t *testing.T) {
+		t.Parallel()
+		b := &BrewInstaller{
+			Formula:    "copilot-cli",
+			brewBinDir: func() (string, error) { return "", fmt.Errorf("no brew dir") },
+			lookPath: func(name string) (string, error) {
+				if name == "copilot" {
+					return "/opt/homebrew/bin/copilot", nil
+				}
+				return "", fmt.Errorf("not found")
+			},
+		}
+		got, err := b.resolveInstalledBinary("copilot-cli")
+		if err != nil {
+			t.Fatalf("resolveInstalledBinary() error = %v", err)
+		}
+		if got != "/opt/homebrew/bin/copilot" {
+			t.Fatalf("got %q, want /opt/homebrew/bin/copilot", got)
+		}
+	})
+
 	t.Run("nothing found", func(t *testing.T) {
 		t.Parallel()
 		b := &BrewInstaller{
@@ -485,5 +595,56 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 			t.Fatal("resolveInstalledBinary() should fail when nothing is found")
 		}
 	})
-}
 
+	t.Run("formula bin dir with single executable", func(t *testing.T) {
+		t.Parallel()
+		formulaBin := t.TempDir()
+		want := filepath.Join(formulaBin, "github-copilot-cli")
+		if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatalf("write binary: %v", err)
+		}
+
+		b := &BrewInstaller{
+			Formula:       "copilot-cli",
+			brewBinDir:    func() (string, error) { return "", fmt.Errorf("no brew dir") },
+			formulaBinDir: func(formula string) (string, error) { return formulaBin, nil },
+			lookPath:      func(name string) (string, error) { return "", fmt.Errorf("not found") },
+		}
+
+		got, err := b.resolveInstalledBinary("copilot-cli")
+		if err != nil {
+			t.Fatalf("resolveInstalledBinary() error = %v", err)
+		}
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("formula bin dir chooses token-matching executable", func(t *testing.T) {
+		t.Parallel()
+		formulaBin := t.TempDir()
+		unrelated := filepath.Join(formulaBin, "helper-tool")
+		want := filepath.Join(formulaBin, "github-copilot-cli")
+		if err := os.WriteFile(unrelated, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatalf("write unrelated binary: %v", err)
+		}
+		if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatalf("write binary: %v", err)
+		}
+
+		b := &BrewInstaller{
+			Formula:       "copilot-cli",
+			brewBinDir:    func() (string, error) { return "", fmt.Errorf("no brew dir") },
+			formulaBinDir: func(formula string) (string, error) { return formulaBin, nil },
+			lookPath:      func(name string) (string, error) { return "", fmt.Errorf("not found") },
+		}
+
+		got, err := b.resolveInstalledBinary("copilot-cli")
+		if err != nil {
+			t.Fatalf("resolveInstalledBinary() error = %v", err)
+		}
+		if got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+}

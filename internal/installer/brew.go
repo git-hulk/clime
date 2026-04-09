@@ -17,6 +17,7 @@ type BrewInstaller struct {
 	runBrewUpdate    func(formula string) error
 	runBrewUninstall func(formula string) error
 	brewBinDir       func() (string, error)
+	formulaBinDir    func(formula string) (string, error)
 	pluginBinDir     func() (string, error)
 	getVersion       func(formula string) (string, error)
 	lookPath         func(name string) (string, error)
@@ -30,6 +31,7 @@ func NewBrewInstaller(formula string) *BrewInstaller {
 		runBrewUpdate:    runBrewUpdate,
 		runBrewUninstall: runBrewUninstall,
 		brewBinDir:       brewBinDir,
+		formulaBinDir:    brewFormulaBinDir,
 		pluginBinDir:     plugin.PluginBinDir,
 		getVersion:       getBrewInstalledVersion,
 		lookPath:         osexec.LookPath,
@@ -41,13 +43,15 @@ func (b *BrewInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("homebrew is not installed or not on PATH: %w", err)
 	}
 
-	if err := b.runBrewInstall(b.Formula); err != nil {
-		return "", fmt.Errorf("installing formula %q: %w", b.Formula, err)
-	}
-
-	binaryPath, err := b.resolveInstalledBinary(name)
-	if err != nil {
-		return "", err
+	installErr := b.runBrewInstall(b.Formula)
+	binaryPath, resolveErr := b.resolveInstalledBinary(name)
+	if installErr != nil {
+		// If brew install fails but an executable is already available, link it anyway.
+		if resolveErr != nil {
+			return "", fmt.Errorf("installing formula %q: %w", b.Formula, installErr)
+		}
+	} else if resolveErr != nil {
+		return "", resolveErr
 	}
 
 	installDir, err := b.pluginBinDir()
@@ -137,33 +141,145 @@ func (b *BrewInstaller) PluginType() string { return plugin.SourceTypeBrew }
 func (b *BrewInstaller) Source() string     { return b.Formula }
 
 func (b *BrewInstaller) resolveInstalledBinary(name string) (string, error) {
-	binName := plugin.BinPrefix + name
+	candidates := preferredBinaryNames(name, b.Formula)
+	binName := candidates[0]
 
-	if binDir, err := b.brewBinDir(); err == nil {
-		path := filepath.Join(binDir, binName)
-		if _, statErr := os.Stat(path); statErr == nil {
-			return path, nil
-		}
-		path = filepath.Join(binDir, name)
-		if _, statErr := os.Stat(path); statErr == nil {
-			return path, nil
+	if b.brewBinDir != nil {
+		if binDir, err := b.brewBinDir(); err == nil {
+			if path, ok := findFirstExistingBinary(binDir, candidates); ok {
+				return path, nil
+			}
 		}
 	}
 
-	if found, err := b.lookPath(binName); err == nil {
-		return found, nil
+	lookPath := b.lookPath
+	if lookPath == nil {
+		lookPath = osexec.LookPath
 	}
-	if found, err := b.lookPath(name); err == nil {
-		return found, nil
+
+	for _, candidate := range candidates {
+		if found, err := lookPath(candidate); err == nil {
+			return found, nil
+		}
+	}
+
+	formulaBinDir := b.formulaBinDir
+	if formulaBinDir == nil {
+		formulaBinDir = brewFormulaBinDir
+	}
+	if binDir, err := formulaBinDir(b.Formula); err == nil {
+		if path, ok := findFirstExistingBinary(binDir, candidates); ok {
+			return path, nil
+		}
+		if path, ok := findLikelyBinaryInDir(binDir, candidates); ok {
+			return path, nil
+		}
 	}
 
 	return "", fmt.Errorf("binary %q or %q not found after brew install %q", binName, name, b.Formula)
 }
 
+func preferredBinaryNames(name, formula string) []string {
+	var candidates []string
+	addCandidateWithCLIVariants(&candidates, plugin.BinPrefix+name)
+	addCandidateWithCLIVariants(&candidates, name)
+
+	formulaName := filepath.Base(strings.TrimSpace(formula))
+	if formulaName != "" {
+		addCandidateWithCLIVariants(&candidates, formulaName)
+		if strings.HasPrefix(formulaName, plugin.BinPrefix) {
+			addCandidateWithCLIVariants(&candidates, strings.TrimPrefix(formulaName, plugin.BinPrefix))
+		} else {
+			addCandidateWithCLIVariants(&candidates, plugin.BinPrefix+formulaName)
+		}
+	}
+
+	deduped := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		deduped = append(deduped, candidate)
+	}
+	return deduped
+}
+
+func addCandidateWithCLIVariants(candidates *[]string, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	*candidates = append(*candidates, name)
+
+	if strings.HasSuffix(name, "-cli") {
+		trimmed := strings.TrimSuffix(name, "-cli")
+		trimmed = strings.TrimSuffix(trimmed, "-")
+		if trimmed != "" {
+			*candidates = append(*candidates, trimmed)
+		}
+	}
+}
+
+func findFirstExistingBinary(dir string, names []string) (string, bool) {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func findLikelyBinaryInDir(dir string, preferred []string) (string, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+
+	executables := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+			continue
+		}
+		executables = append(executables, filepath.Join(dir, entry.Name()))
+	}
+
+	if len(executables) == 1 {
+		return executables[0], true
+	}
+
+	matches := make([]string, 0, len(executables))
+	for _, path := range executables {
+		base := filepath.Base(path)
+		for _, token := range preferred {
+			if strings.Contains(base, token) {
+				matches = append(matches, path)
+				break
+			}
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	return "", false
+}
+
 // brew helper functions
 
 func runBrewInstall(formula string) error {
-	cmd := osexec.Command("brew", "install", formula)
+	cmd := brewInstallOrUpgradeCmd("install", formula)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("brew install failed: %w\n%s", err, string(output))
 	}
@@ -171,7 +287,7 @@ func runBrewInstall(formula string) error {
 }
 
 func runBrewUpdate(formula string) error {
-	cmd := osexec.Command("brew", "upgrade", formula)
+	cmd := brewInstallOrUpgradeCmd("upgrade", formula)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// brew upgrade exits non-zero when the formula is already at the latest version.
@@ -191,10 +307,24 @@ func runBrewUninstall(formula string) error {
 	return nil
 }
 
+func brewInstallOrUpgradeCmd(action, formula string) *osexec.Cmd {
+	cmd := osexec.Command("brew", action, formula)
+	cmd.Env = append(os.Environ(), "HOMEBREW_NO_INSTALL_CLEANUP=1")
+	return cmd
+}
+
 func brewBinDir() (string, error) {
 	out, err := osexec.Command("brew", "--prefix").Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get brew prefix: %w", err)
+	}
+	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
+}
+
+func brewFormulaBinDir(formula string) (string, error) {
+	out, err := osexec.Command("brew", "--prefix", formula).Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get brew formula prefix: %w", err)
 	}
 	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
 }
