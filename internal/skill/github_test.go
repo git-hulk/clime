@@ -3,6 +3,7 @@ package skill
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -195,4 +196,73 @@ func TestCloneAndReadSkillFilesFromLocalRepoWithoutGit(t *testing.T) {
 	if string(files["extra.txt"]) != "extra" {
 		t.Fatalf("extra.txt = %q, want %q", files["extra.txt"], "extra")
 	}
+}
+
+func TestSourceRepoDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input   string
+		wantEnd string
+	}{
+		{"owner/repo", filepath.Join(".clime", "sources", "owner", "repo")},
+		{"https://github.com/owner/repo.git", filepath.Join(".clime", "sources", "github.com", "owner", "repo")},
+		{"git@github.com:owner/repo.git", filepath.Join(".clime", "sources", "github.com", "owner", "repo")},
+		{"http://example.com/foo/bar.git", filepath.Join(".clime", "sources", "example.com", "foo", "bar")},
+	}
+
+	for _, tt := range tests {
+		got, err := sourceRepoDir(tt.input)
+		if err != nil {
+			t.Errorf("sourceRepoDir(%q) error = %v", tt.input, err)
+			continue
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("sourceRepoDir(%q) = %q, want absolute path", tt.input, got)
+		}
+		if !strings.HasSuffix(got, tt.wantEnd) {
+			t.Errorf("sourceRepoDir(%q) = %q, want suffix %q", tt.input, got, tt.wantEnd)
+		}
+	}
+}
+
+func TestPrepareRepoDirUsesLocalRepo(t *testing.T) {
+	dir := t.TempDir()
+
+	got, cleanup, err := PrepareRepoDir(dir)
+	if err != nil {
+		t.Fatalf("PrepareRepoDir() error = %v", err)
+	}
+	defer cleanup()
+
+	want, _ := filepath.Abs(dir)
+	if got != want {
+		t.Fatalf("PrepareRepoDir() = %q, want %q", got, want)
+	}
+}
+
+func TestRemoveSourceDir(t *testing.T) {
+	// Create a fake source dir.
+	srcDir, err := sourceRepoDir("test-owner/test-repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "test.txt"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveSourceDir("test-owner/test-repo"); err != nil {
+		t.Fatalf("RemoveSourceDir() error = %v", err)
+	}
+
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Fatalf("source dir still exists after RemoveSourceDir")
+	}
+
+	// Cleanup parent dirs.
+	home, _ := os.UserHomeDir()
+	os.RemoveAll(filepath.Join(home, ".clime", "sources", "test-owner"))
 }

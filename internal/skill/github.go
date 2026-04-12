@@ -2,10 +2,7 @@ package skill
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,23 +10,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-// httpError represents an HTTP error with a status code.
-type httpError struct {
-	StatusCode int
-	Path       string
-}
-
-func (e *httpError) Error() string {
-	return fmt.Sprintf("HTTP %d for %s", e.StatusCode, e.Path)
-}
-
-// errAPIUnavailable indicates the GitHub API returned a non-404 error
-// (e.g. rate limiting, authentication failure) and a clone fallback should be tried.
-var errAPIUnavailable = errors.New("GitHub API unavailable")
-
-// fileFetcher fetches a single file from a repository given an owner/repo string and a file path.
-type fileFetcher func(repo, path string) ([]byte, error)
 
 // SkillEntry describes a skill in a repo's skills.yaml manifest.
 type SkillEntry struct {
@@ -76,6 +56,31 @@ func LocalRepoDir(repo string) (string, bool, error) {
 	return "", false, nil
 }
 
+// sourceRepoDir returns the persistent local directory for a cached source repository.
+// The directory is under ~/.clime/sources/<sanitized-repo>/.
+func sourceRepoDir(repo string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	name := repo
+	name = strings.TrimPrefix(name, "https://")
+	name = strings.TrimPrefix(name, "http://")
+	name = strings.TrimPrefix(name, "git@")
+	name = strings.TrimSuffix(name, ".git")
+	name = strings.ReplaceAll(name, ":", "/")
+	return filepath.Join(home, ".clime", "sources", name), nil
+}
+
+// RemoveSourceDir removes the persistent local cache for a source repository.
+func RemoveSourceDir(repo string) error {
+	dir, err := sourceRepoDir(repo)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
 // repoToCloneURL converts an "owner/repo" shorthand to a git clone URL.
 // Full URLs (https://, git@) and local paths (absolute or relative) are returned as-is.
 func repoToCloneURL(repo string) string {
@@ -88,77 +93,56 @@ func repoToCloneURL(repo string) string {
 	return fmt.Sprintf("https://github.com/%s.git", repo)
 }
 
-// isGitHubShorthand checks if repo is in "owner/repo" format (not a URL or local path).
-func isGitHubShorthand(repo string) bool {
-	if strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "git@") {
-		return false
-	}
-	if strings.HasPrefix(repo, "/") || strings.HasPrefix(repo, "./") || strings.HasPrefix(repo, "../") {
-		return false
-	}
-	return strings.Contains(repo, "/")
-}
-
-// cloneRepo performs a shallow clone (depth 1) into a temp directory and
-// returns the path. The caller is responsible for removing it.
-func cloneRepo(repo string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "clime-skill-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp directory: %w", err)
-	}
-
-	url := repoToCloneURL(repo)
-	cmd := exec.Command("git", "clone", "--depth", "1", url, tmpDir)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-
+// cloneViaGH attempts to clone a repo using the GitHub CLI (gh).
+func cloneViaGH(repo, dir string) error {
+	cmd := exec.Command("gh", "repo", "clone", repo, dir, "--", "--depth", "1")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("git clone failed: %w\n%s", err, out)
+		os.RemoveAll(dir)
+		return fmt.Errorf("gh repo clone failed: %w\n%s", err, out)
 	}
-	return tmpDir, nil
+	return nil
 }
 
-// fetchGitHubFile fetches a single file from a GitHub repository via the API.
-// repo must be in "owner/repo" format. path is relative to the repo root.
-func fetchGitHubFile(repo, path string) ([]byte, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s", repo, path)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
+// cloneViaGit performs a shallow clone (depth 1) using git directly.
+func cloneViaGit(repo, dir string) error {
+	url := repoToCloneURL(repo)
+	cmd := exec.Command("git", "clone", "--depth", "1", url, dir)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		os.RemoveAll(dir)
+		return fmt.Errorf("git clone failed: %w\n%s", err, out)
 	}
-	req.Header.Set("Accept", "application/vnd.github.raw+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, &httpError{StatusCode: resp.StatusCode, Path: path}
-	}
-	return io.ReadAll(resp.Body)
+	return nil
 }
 
-// fetchGitHubFileWithGH fetches a single file from a GitHub repository using the gh CLI.
-// repo must be in "owner/repo" format. path is relative to the repo root.
-func fetchGitHubFileWithGH(repo, path string) ([]byte, error) {
-	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/contents/%s", repo, path),
-		"-H", "Accept: application/vnd.github.raw+json",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gh api failed for %s: %w", path, err)
+// cloneRepoTo performs a shallow clone (depth 1) into the specified directory.
+// It first attempts to use the GitHub CLI (gh) for cloning, falling back to
+// git if gh is unavailable or the clone fails.
+func cloneRepoTo(repo, dir string) error {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
-	return out, nil
+
+	if err := cloneViaGH(repo, dir); err == nil {
+		return nil
+	}
+	return cloneViaGit(repo, dir)
+}
+
+// pullRepo updates an existing git repository by pulling the latest changes.
+func pullRepo(dir string) error {
+	cmd := exec.Command("git", "pull")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git pull failed: %w\n%s", err, out)
+	}
+	return nil
 }
 
 // PrepareRepoDir returns a directory that can be read for skill files.
-// Existing local repos are reused directly; remote repos are cloned into a temp dir.
+// Existing local repos are reused directly; remote repos are cached in
+// ~/.clime/sources/ and updated with git pull on subsequent calls.
 // The returned cleanup function must always be called by the caller.
 func PrepareRepoDir(repo string) (string, func(), error) {
 	if dir, ok, err := LocalRepoDir(repo); err != nil {
@@ -167,129 +151,31 @@ func PrepareRepoDir(repo string) (string, func(), error) {
 		return dir, func() {}, nil
 	}
 
-	dir, err := cloneRepo(repo)
+	srcDir, err := sourceRepoDir(repo)
 	if err != nil {
+		return "", nil, err
+	}
+
+	if info, err := os.Stat(srcDir); err == nil && info.IsDir() {
+		// Source exists locally, update it with the latest changes.
+		if err := pullRepo(srcDir); err != nil {
+			return "", nil, fmt.Errorf("failed to update %s: %w", repo, err)
+		}
+		return srcDir, func() {}, nil
+	}
+
+	// Clone to persistent source directory.
+	if err := cloneRepoTo(repo, srcDir); err != nil {
 		return "", nil, fmt.Errorf("failed to clone %s: %w", repo, err)
 	}
-	return dir, func() { _ = os.RemoveAll(dir) }, nil
+	return srcDir, func() {}, nil
 }
 
 // FetchRepoManifest fetches skills from a repo's manifest.
-// For GitHub repos (owner/repo format), it tries the GitHub API first.
-// If the API is unavailable (e.g. rate limited), it falls back to git clone.
+// The repo is always cloned (or updated) into ~/.clime/sources/ so
+// the source is cached locally for subsequent operations.
 // Existing local paths are read directly without cloning.
 func FetchRepoManifest(repo string) (*RepoManifest, error) {
-	if dir, ok, err := LocalRepoDir(repo); err != nil {
-		return nil, err
-	} else if ok {
-		return readRepoManifestFromDir(dir, repo)
-	}
-
-	if isGitHubShorthand(repo) {
-		// Try gh CLI first for authenticated access.
-		if manifest, err := fetchRepoManifestWithGH(repo); err == nil {
-			return manifest, nil
-		}
-
-		// Fall back to GitHub API.
-		manifest, err := fetchRepoManifestFromAPI(repo)
-		if err == nil {
-			return manifest, nil
-		}
-		// Fall back to git clone when the API is unavailable (rate limited, auth error, etc.).
-		if errors.Is(err, errAPIUnavailable) {
-			return fetchRepoManifestFromClone(repo)
-		}
-		return nil, err
-	}
-	return fetchRepoManifestFromClone(repo)
-}
-
-// fetchRepoManifestWithGH fetches the manifest using the gh CLI.
-// Returns an error if gh is unavailable or the manifest cannot be found.
-func fetchRepoManifestWithGH(repo string) (*RepoManifest, error) {
-	for _, name := range []string{"skills.yaml", "skills.yml"} {
-		data, err := fetchGitHubFileWithGH(repo, name)
-		if err == nil {
-			var manifest RepoManifest
-			if err := yaml.Unmarshal(data, &manifest); err != nil {
-				return nil, fmt.Errorf("failed to parse %s: %w", name, err)
-			}
-			return &manifest, nil
-		}
-	}
-
-	// Try marketplace.json.
-	if data, err := fetchGitHubFileWithGH(repo, ".claude-plugin/marketplace.json"); err == nil {
-		if manifest, err := parseMarketplaceData(repo, data, fetchGitHubFileWithGH); err == nil && len(manifest.Skills) > 0 {
-			return manifest, nil
-		}
-	}
-
-	// Fall back to plugin.json.
-	if data, err := fetchGitHubFileWithGH(repo, ".claude-plugin/plugin.json"); err == nil {
-		if manifest, err := parsePluginData(repo, data, fetchGitHubFileWithGH); err == nil && len(manifest.Skills) > 0 {
-			return manifest, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no skills manifest found in %s via gh CLI", repo)
-}
-
-// fetchRepoManifestFromAPI fetches the manifest using the GitHub Contents API.
-// Returns errAPIUnavailable when the API returns non-404 errors (e.g. rate limiting)
-// so the caller can fall back to git clone.
-func fetchRepoManifestFromAPI(repo string) (*RepoManifest, error) {
-	var hasAPIError bool
-
-	// Try skills.yaml / skills.yml first.
-	for _, name := range []string{"skills.yaml", "skills.yml"} {
-		data, err := fetchGitHubFile(repo, name)
-		if err == nil {
-			var manifest RepoManifest
-			if err := yaml.Unmarshal(data, &manifest); err != nil {
-				return nil, fmt.Errorf("failed to parse %s: %w", name, err)
-			}
-			return &manifest, nil
-		}
-		if isNon404HTTPError(err) {
-			hasAPIError = true
-		}
-	}
-
-	// Fall back to .claude-plugin/marketplace.json.
-	if data, err := fetchGitHubFile(repo, ".claude-plugin/marketplace.json"); err == nil {
-		if manifest, err := parseMarketplaceData(repo, data, fetchGitHubFile); err == nil && len(manifest.Skills) > 0 {
-			return manifest, nil
-		}
-	} else if isNon404HTTPError(err) {
-		hasAPIError = true
-	}
-
-	// Fall back to .claude-plugin/plugin.json.
-	if data, err := fetchGitHubFile(repo, ".claude-plugin/plugin.json"); err == nil {
-		if manifest, err := parsePluginData(repo, data, fetchGitHubFile); err == nil && len(manifest.Skills) > 0 {
-			return manifest, nil
-		}
-	} else if isNon404HTTPError(err) {
-		hasAPIError = true
-	}
-
-	if hasAPIError {
-		return nil, fmt.Errorf("%w for %s: consider setting GITHUB_TOKEN", errAPIUnavailable, repo)
-	}
-	return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json", repo)
-}
-
-// isNon404HTTPError returns true if the error is an HTTP error with a status code
-// other than 404 (e.g. 403 rate limit, 401 unauthorized).
-func isNon404HTTPError(err error) bool {
-	var he *httpError
-	return errors.As(err, &he) && he.StatusCode != http.StatusNotFound
-}
-
-// fetchRepoManifestFromClone resolves the repo to a readable directory and parses skills from its root.
-func fetchRepoManifestFromClone(repo string) (*RepoManifest, error) {
 	dir, cleanup, err := PrepareRepoDir(repo)
 	if err != nil {
 		return nil, err
@@ -383,54 +269,10 @@ func parseMarketplaceManifest(dir string) (*RepoManifest, error) {
 	return &manifest, nil
 }
 
-// parseMarketplaceData parses marketplace.json data and fetches SKILL.md
-// frontmatter via the GitHub API for each skill.
-func parseMarketplaceData(repo string, data []byte, fetch fileFetcher) (*RepoManifest, error) {
-	var mf marketplaceFile
-	if err := json.Unmarshal(data, &mf); err != nil {
-		return nil, fmt.Errorf("failed to parse marketplace.json: %w", err)
-	}
-
-	var manifest RepoManifest
-	seen := make(map[string]bool)
-	for _, plugin := range mf.Plugins {
-		sourceDir := strings.TrimPrefix(plugin.Source, "./")
-		for _, skillPath := range plugin.Skills {
-			skillPath = strings.TrimPrefix(skillPath, "./")
-			if sourceDir != "" {
-				skillPath = filepath.Join(sourceDir, skillPath)
-			}
-			if seen[skillPath] {
-				continue
-			}
-			seen[skillPath] = true
-
-			entry := SkillEntry{Path: skillPath}
-			if fmData, err := fetch(repo, skillPath+"/SKILL.md"); err == nil {
-				if fm, err := parseSkillFrontmatter(fmData); err == nil {
-					entry.Name = fm.Name
-					entry.Description = fm.Description
-				}
-			}
-			if entry.Name == "" {
-				entry.Name = filepath.Base(skillPath)
-			}
-			manifest.Skills = append(manifest.Skills, entry)
-		}
-	}
-	return &manifest, nil
-}
-
 // pluginFile represents the .claude-plugin/plugin.json format.
 type pluginFile struct {
 	Name   string `json:"name"`
 	Skills string `json:"skills"`
-}
-
-// ghDirEntry represents a single entry in a GitHub directory listing.
-type ghDirEntry struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
 }
 
 // parsePluginManifest reads .claude-plugin/plugin.json from a local directory
@@ -474,51 +316,6 @@ func parsePluginManifest(dir string) (*RepoManifest, error) {
 	return &manifest, nil
 }
 
-// parsePluginData parses plugin.json data and discovers skills by listing the
-// skills directory via the provided fetch function.
-func parsePluginData(repo string, data []byte, fetch fileFetcher) (*RepoManifest, error) {
-	var pf pluginFile
-	if err := json.Unmarshal(data, &pf); err != nil {
-		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
-	}
-	if pf.Skills == "" {
-		return nil, fmt.Errorf("plugin.json has no skills directory")
-	}
-
-	skillsDir := strings.TrimPrefix(pf.Skills, "./")
-
-	// List the skills directory contents via the GitHub contents API.
-	listData, err := fetch(repo, skillsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list skills directory: %w", err)
-	}
-
-	var dirEntries []ghDirEntry
-	if err := json.Unmarshal(listData, &dirEntries); err != nil {
-		return nil, fmt.Errorf("failed to parse directory listing: %w", err)
-	}
-
-	var manifest RepoManifest
-	for _, de := range dirEntries {
-		if de.Type != "dir" {
-			continue
-		}
-		skillPath := filepath.Join(skillsDir, de.Name)
-		entry := SkillEntry{Path: skillPath}
-		if fmData, err := fetch(repo, skillPath+"/SKILL.md"); err == nil {
-			if fm, err := parseSkillFrontmatter(fmData); err == nil {
-				entry.Name = fm.Name
-				entry.Description = fm.Description
-			}
-		}
-		if entry.Name == "" {
-			entry.Name = de.Name
-		}
-		manifest.Skills = append(manifest.Skills, entry)
-	}
-	return &manifest, nil
-}
-
 // skillFrontmatter holds the YAML frontmatter from a SKILL.md file.
 type skillFrontmatter struct {
 	Name        string `yaml:"name"`
@@ -554,10 +351,10 @@ func readSkillFrontmatter(path string) (*skillFrontmatter, error) {
 	return parseSkillFrontmatter(data)
 }
 
-// CloneRepo performs a shallow clone of a repo into a temp directory and
-// returns the path. The caller is responsible for removing it with os.RemoveAll.
+// CloneRepo clones (or updates) a repo into ~/.clime/sources/ and returns the path.
 func CloneRepo(repo string) (string, error) {
-	return cloneRepo(repo)
+	dir, _, err := PrepareRepoDir(repo)
+	return dir, err
 }
 
 // ReadSkillFilesFromDir reads all files under skillPath from a local directory.
