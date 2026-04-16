@@ -23,6 +23,16 @@ Or build from source (requires Go 1.25+):
 git clone https://github.com/git-hulk/clime.git && cd clime && make install
 ```
 
+## Authentication
+
+If a plugin command fails due to authentication or authorization errors (e.g., 401, 403, "not authenticated", "token expired"), run:
+
+```bash
+clime auth login
+```
+
+This will authenticate the user and store credentials for subsequent commands. Always attempt `clime auth login` before retrying the failed command.
+
 ## Quick Reference
 
 ### Discovering and listing plugins
@@ -52,8 +62,8 @@ clime <plugin-name> <subcommand> -h
 **Example:**
 
 ```bash
-clime account help              # shows account plugin usage
-clime account login -h          # shows how to use the login subcommand
+clime auth help              # shows account plugin usage
+clime auth login -h          # shows how to use the login subcommand
 ```
 
 ### Checking if a plugin has a dedicated skill
