@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -331,6 +332,7 @@ func updateSource(manifest *skill.Manifest, repo string) error {
 	defer cleanup()
 
 	fmt.Println()
+	var removed []string
 	for _, s := range installed {
 		entry := &skill.SkillEntry{
 			Name:        s.Name,
@@ -338,8 +340,22 @@ func updateSource(manifest *skill.Manifest, repo string) error {
 			Path:        s.Path,
 		}
 		if err := installSkillEntry(manifest, entry, repo, dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				removed = append(removed, s.Name)
+				continue
+			}
 			terminal.Errorf("Failed to update %q: %v", s.Name, err)
 		}
+	}
+	if len(removed) > 0 {
+		for _, name := range removed {
+			skill.Uninstall(name)
+			manifest.RemoveSkill(name)
+		}
+		if err := manifest.Save(); err != nil {
+			return fmt.Errorf("failed to update manifest after removing skills: %w", err)
+		}
+		terminal.Warningf("The following skills were removed from upstream: %s", strings.Join(removed, ", "))
 	}
 	return nil
 }
@@ -359,7 +375,11 @@ func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo s
 		targets, err = skill.Install(entry.Name, repo, entry.Path)
 	}
 	if err != nil {
-		spinner.Error(fmt.Sprintf("Failed to install skill %q", entry.Name))
+		if errors.Is(err, os.ErrNotExist) {
+			spinner.Stop()
+		} else {
+			spinner.Error(fmt.Sprintf("Failed to install skill %q", entry.Name))
+		}
 		return fmt.Errorf("failed to install skill %q: %w", entry.Name, err)
 	}
 
