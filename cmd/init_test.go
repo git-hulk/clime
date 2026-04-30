@@ -8,7 +8,7 @@ import (
 
 func TestFilterPluginsByTags(t *testing.T) {
 	plugins := []plugin.Plugin{
-		{Name: "core"},                                     // untagged
+		{Name: "core"}, // untagged
 		{Name: "devops-tool", Tags: []string{"devops"}},    // single tag
 		{Name: "email", Tags: []string{"devops", "email"}}, // multi tag
 		{Name: "infra", Tags: []string{"infra"}},           // single tag

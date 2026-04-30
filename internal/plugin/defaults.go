@@ -42,6 +42,29 @@ func LoadPluginsFromFile(path string) (*PluginList, error) {
 	return &defaults, nil
 }
 
+// CategorizeForInit splits the resolved plugin list into:
+//   - toInstall:   not present in the manifest.
+//   - toReinstall: present with type=script but the local source URL differs
+//     from the remote-declared script URL. Drift for brew/npm/github is
+//     intentionally not detected here — those install methods touch
+//     system-wide state and need explicit user action to switch source.
+//   - skipped:     already installed and matching, or non-script type.
+func CategorizeForInit(plugins []Plugin, manifest *Manifest) (toInstall, toReinstall []Plugin, skipped []string) {
+	for _, p := range plugins {
+		entry, exists := manifest.Get(p.Name)
+		if !exists {
+			toInstall = append(toInstall, p)
+			continue
+		}
+		if p.Script != "" && entry.Type == SourceTypeScript && entry.Source != p.Script {
+			toReinstall = append(toReinstall, p)
+			continue
+		}
+		skipped = append(skipped, p.Name)
+	}
+	return
+}
+
 // FilterByTags returns plugins that should be installed based on the given
 // tags. Untagged plugins are always included. Tagged plugins are only included
 // if tags are provided and they share at least one tag with the provided list.

@@ -49,50 +49,56 @@ Otherwise, the built-in default plugin list is used.`,
 			manifest = &plugin.Manifest{}
 		}
 
-		// Filter out already-installed plugins.
-		var missing []plugin.Plugin
-		var skipped []string
-		for _, p := range plugins {
-			if _, exists := manifest.Get(p.Name); exists {
-				skipped = append(skipped, p.Name)
-			} else {
-				missing = append(missing, p)
-			}
-		}
+		toInstall, toReinstall, skipped := plugin.CategorizeForInit(plugins, manifest)
 
 		if len(skipped) > 0 {
 			terminal.Infof("Skipping %d already installed plugin(s): %s", len(skipped), formatNames(skipped))
 		}
 
-		if len(missing) == 0 {
+		if len(toInstall) == 0 && len(toReinstall) == 0 {
 			terminal.Success("All plugins are already installed.")
 			return nil
 		}
 
-		terminal.Infof("Installing %d missing plugin(s)...", len(missing))
+		if len(toInstall) > 0 {
+			terminal.Infof("Installing %d new plugin(s)...", len(toInstall))
+		}
+		if len(toReinstall) > 0 {
+			terminal.Infof("Reinstalling %d plugin(s) due to install URL changes:", len(toReinstall))
+			for _, p := range toReinstall {
+				if entry, ok := manifest.Get(p.Name); ok {
+					fmt.Printf("  • %s: %s → %s\n", p.Name, entry.Source, p.Script)
+				}
+			}
+		}
 		fmt.Println()
 
 		var failed []string
 
-		for _, p := range missing {
+		runInstall := func(p plugin.Plugin, reinstall bool) {
+			verb := "Installing"
+			if reinstall {
+				verb = "Reinstalling"
+			}
+
 			spinner := uicli.NewSpinner().
 				WithStyle(uicli.SpinnerDots).
 				WithColor(uicli.CyanColor).
-				WithMessage(fmt.Sprintf("Installing %q...", p.Name)).
+				WithMessage(fmt.Sprintf("%s %q...", verb, p.Name)).
 				Start()
 
 			inst, err := installer.FromPlugin(p)
 			if err != nil {
 				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, err))
 				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, err))
-				continue
+				return
 			}
 
 			version, installErr := inst.Install(p.Name)
 			if installErr != nil {
 				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, installErr))
 				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, installErr))
-				continue
+				return
 			}
 
 			manifest.Add(p.Name, version, inst.PluginType(), inst.Source(), "")
@@ -100,11 +106,22 @@ Otherwise, the built-in default plugin list is used.`,
 				manifest.SetDescription(p.Name, p.Description)
 			}
 
-			if path, ok := plugin.Find(p.Name); ok {
-				spinner.Success(fmt.Sprintf("Installed %q (%s)", p.Name, path))
-			} else {
-				spinner.Success(fmt.Sprintf("Installed %q", p.Name))
+			doneVerb := "Installed"
+			if reinstall {
+				doneVerb = "Reinstalled"
 			}
+			if path, ok := plugin.Find(p.Name); ok {
+				spinner.Success(fmt.Sprintf("%s %q (%s)", doneVerb, p.Name, path))
+			} else {
+				spinner.Success(fmt.Sprintf("%s %q", doneVerb, p.Name))
+			}
+		}
+
+		for _, p := range toInstall {
+			runInstall(p, false)
+		}
+		for _, p := range toReinstall {
+			runInstall(p, true)
 		}
 
 		if err := manifest.Save(); err != nil {
@@ -117,7 +134,8 @@ Otherwise, the built-in default plugin list is used.`,
 		}
 
 		fmt.Println()
-		terminal.Successf("All %d plugins installed!", len(missing))
+		total := len(toInstall) + len(toReinstall)
+		terminal.Successf("All %d plugin(s) processed!", total)
 		return nil
 	},
 }
