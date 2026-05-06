@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	pluginInstall       plugin.Plugin
-	pluginUpdateRepo    string
-	pluginUpdateForce   bool
-	pluginInstallRunner = executePluginInstall
+	pluginInstall        plugin.Plugin
+	pluginUpdateRepo     string
+	pluginUpdateForce    bool
+	pluginInstallRunner  = executePluginInstall
+	pluginSkillInstaller = tryInstallPluginSkills
 )
 
 func init() {
@@ -336,6 +337,8 @@ func executePluginInstall(manifest *plugin.Manifest, name string, p plugin.Plugi
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
+
+	pluginSkillInstaller(name)
 
 	spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
 	return nil
