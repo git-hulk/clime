@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	pluginInstall       plugin.Plugin
-	pluginUpdateRepo    string
-	pluginUpdateForce   bool
-	pluginInstallRunner = executePluginInstall
+	pluginInstall        plugin.Plugin
+	pluginUpdateRepo     string
+	pluginUpdateForce    bool
+	pluginInstallRunner  = executePluginInstall
+	pluginSkillInstaller = tryInstallPluginSkills
 )
 
 func init() {
@@ -77,7 +78,6 @@ var pluginListCmd = &cobra.Command{
 			rows = append(rows, []string{name, desc, version, source, path})
 		}
 
-		// Compute max width per column from headers and data.
 		colWidths := make([]int, len(headers))
 		for i, h := range headers {
 			colWidths[i] = len(h)
@@ -92,7 +92,6 @@ var pluginListCmd = &cobra.Command{
 
 		const gap = 2
 		const indent = "  "
-		// Print bold headers.
 		fmt.Print(indent)
 		for i, h := range headers {
 			if i > 0 {
@@ -101,7 +100,6 @@ var pluginListCmd = &cobra.Command{
 			fmt.Print(uicli.BoldColor.Sprintf("%-*s", colWidths[i], h))
 		}
 		fmt.Println()
-		// Print separator.
 		fmt.Print(indent)
 		for i, w := range colWidths {
 			if i > 0 {
@@ -110,7 +108,6 @@ var pluginListCmd = &cobra.Command{
 			fmt.Print(strings.Repeat("-", w))
 		}
 		fmt.Println()
-		// Print data rows.
 		for _, row := range rows {
 			fmt.Print(indent)
 			for i, cell := range row {
@@ -154,7 +151,7 @@ func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, hom
 var pluginInstallCmd = &cobra.Command{
 	Use:   "install [name]",
 	Short: "Install a plugin from GitHub Releases, npm, Homebrew, or an install script",
-	Long:  "Downloads and installs a plugin. Run without arguments for an interactive wizard. With a name argument, looks for git-hulk/clime-<name> on GitHub by default. Use --npm, --brew, --repo, or --script to specify an alternative source.",
+	Long:  "Downloads and installs a plugin. Run without arguments for an interactive wizard. With a name argument, looks for git-hulk/clime-<name> on GitHub by default. Use --npm, --brew, --repo, or --script to override the source.",
 	Args:  cobra.MaximumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -204,7 +201,6 @@ var pluginInstallCmd = &cobra.Command{
 }
 
 func runInteractivePluginInstall() error {
-	// Step 1: Enter plugin name.
 	fmt.Println()
 	name, err := inputPrompt("Enter plugin name")
 	if err != nil {
@@ -223,7 +219,6 @@ func runInteractivePluginInstall() error {
 		return err
 	}
 
-	// Step 2: Select install type.
 	installTypes := []string{
 		"Script (curl | sh)",
 		"npm (global package)",
@@ -244,13 +239,12 @@ func runInteractivePluginInstall() error {
 		return err
 	}
 
-	// Step 3: Collect source details based on install type.
 	var p plugin.Plugin
 	p.Name = name
 
 	fmt.Println()
 	switch typeIdx {
-	case 0: // Script
+	case 0:
 		url, err := inputPrompt("Enter install script URL")
 		if err != nil {
 			return err
@@ -267,7 +261,7 @@ func runInteractivePluginInstall() error {
 		}
 		p.BinaryPath = strings.TrimSpace(binPath)
 
-	case 1: // npm
+	case 1:
 		pkg, err := inputPrompt("Enter npm package name")
 		if err != nil {
 			return err
@@ -278,7 +272,7 @@ func runInteractivePluginInstall() error {
 		}
 		p.Npm = pkg
 
-	case 2: // Homebrew
+	case 2:
 		formula, err := inputPrompt("Enter Homebrew formula")
 		if err != nil {
 			return err
@@ -289,7 +283,7 @@ func runInteractivePluginInstall() error {
 		}
 		p.Brew = formula
 
-	case 3: // GitHub Release
+	case 3:
 		repo, err := inputPrompt("Enter GitHub repository (owner/repo)")
 		if err != nil {
 			return err
@@ -301,7 +295,6 @@ func runInteractivePluginInstall() error {
 		p.Repo = repo
 	}
 
-	// Step 4: Optional description.
 	desc, err := inputPrompt("Enter description (leave empty to skip)")
 	if err != nil {
 		return err
@@ -336,6 +329,8 @@ func executePluginInstall(manifest *plugin.Manifest, name string, p plugin.Plugi
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
 	}
+
+	pluginSkillInstaller(name)
 
 	spinner.Success(fmt.Sprintf("Installed plugin %q (%s)", name, version))
 	return nil
@@ -392,7 +387,6 @@ var pluginUninstallCmd = &cobra.Command{
 
 			inst, err := installer.FromManifest(entry)
 			if err != nil {
-				// If we can't determine the installer type, just remove the binary directly.
 				inst = installer.NewGitHubInstaller("")
 			}
 			if err := inst.Uninstall(name, entry); err != nil {
@@ -432,7 +426,7 @@ var pluginUninstallCmd = &cobra.Command{
 var pluginUpdateCmd = &cobra.Command{
 	Use:   "update <name|all>",
 	Short: "Update an installed plugin",
-	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default git-hulk/clime-<name> convention. Use '*' or 'all' to update all managed plugins.",
+	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default convention.",
 	Args:  cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -591,7 +585,6 @@ func runPluginUpdateAll() error {
 	return nil
 }
 
-// completeInstalledPlugins returns completion suggestions for installed plugin names.
 func completeInstalledPlugins(toComplete string) []string {
 	discovered := plugin.Discover()
 	var completions []string
