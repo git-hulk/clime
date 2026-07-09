@@ -14,6 +14,8 @@ import (
 )
 
 func init() {
+	skillsInstallCmd.Flags().BoolVarP(&skillsInstallForce, "force", "f", false,
+		"when installing from a repo, also (re)install skills that are already installed and overwrite them")
 	skillsCmd.AddCommand(skillsListCmd)
 	skillsCmd.AddCommand(skillsInstallCmd)
 	skillsCmd.AddCommand(skillsUninstallCmd)
@@ -124,6 +126,8 @@ var (
 	multiSelectPrompt  = prompt.MultiSelect
 	inputPrompt        = prompt.Input
 	skillsActionRunner = runSkillsSourceAction
+
+	skillsInstallForce bool
 )
 
 var skillsInstallCmd = &cobra.Command{
@@ -137,6 +141,12 @@ var skillsInstallCmd = &cobra.Command{
 		}
 
 		if len(args) > 0 {
+			if skillsInstallForce {
+				if err := validateSkillRepoSource(args[0]); err != nil {
+					return err
+				}
+				return installFromRepo(manifest, args[0], true)
+			}
 			return runSkillsSourceAction(manifest, args[0], actionBrowseInstall)
 		}
 
@@ -245,7 +255,7 @@ func runSkillsSourceAction(manifest *skill.Manifest, repo string, action sourceA
 	case actionUpdate:
 		return updateSource(manifest, repo)
 	default:
-		return installFromRepo(manifest, repo)
+		return installFromRepo(manifest, repo, false)
 	}
 }
 
@@ -413,8 +423,37 @@ func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo s
 	return nil
 }
 
+type installCandidate struct {
+	entry skill.SkillEntry
+	label string
+}
+
+// selectInstallCandidates returns the repo skills that should be offered for
+// installation. Already-installed skills are skipped unless force is set, in
+// which case they are included and their label is marked "(reinstall)".
+func selectInstallCandidates(repoSkills []skill.SkillEntry, manifest *skill.Manifest, force bool) []installCandidate {
+	var candidates []installCandidate
+	for _, s := range repoSkills {
+		_, installed := manifest.GetSkill(s.Name)
+		if installed && !force {
+			continue
+		}
+		label := s.Name
+		if s.Description != "" {
+			label = fmt.Sprintf("%s — %s", s.Name, uicli.TruncateString(s.Description, 60))
+		}
+		if installed {
+			label += " (reinstall)"
+		}
+		candidates = append(candidates, installCandidate{entry: s, label: label})
+	}
+	return candidates
+}
+
 // installFromRepo fetches skills from a repo and lets the user pick which to install.
-func installFromRepo(manifest *skill.Manifest, repo string) error {
+// When force is true, skills that are already installed are kept in the list
+// (instead of being filtered out) so they can be reinstalled and overwritten.
+func installFromRepo(manifest *skill.Manifest, repo string, force bool) error {
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
@@ -440,25 +479,9 @@ func installFromRepo(manifest *skill.Manifest, repo string) error {
 		return fmt.Errorf("failed to save skill source: %w", err)
 	}
 
-	// Filter out already-installed skills.
-	type candidate struct {
-		entry skill.SkillEntry
-		label string
-	}
-	var candidates []candidate
-	for _, s := range repoManifest.Skills {
-		if _, installed := manifest.GetSkill(s.Name); installed {
-			continue
-		}
-		label := s.Name
-		if s.Description != "" {
-			label = fmt.Sprintf("%s — %s", s.Name, uicli.TruncateString(s.Description, 60))
-		}
-		candidates = append(candidates, candidate{entry: s, label: label})
-	}
-
+	candidates := selectInstallCandidates(repoManifest.Skills, manifest, force)
 	if len(candidates) == 0 {
-		terminal.Info("All skills from this repository are already installed.")
+		terminal.Info("All skills from this repository are already installed. Use --force to reinstall them.")
 		return nil
 	}
 
