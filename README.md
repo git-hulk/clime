@@ -67,8 +67,8 @@ clime plugin remove account     # uninstall cleanly
 Bootstrap an entire toolchain at once with `clime init`, using the built-in defaults or a custom YAML manifest:
 
 ```sh
-clime init                                  # built-in defaults
-clime init https://example.com/tools.yaml   # your team's plugin list
+clime init                                  # recorded URL, or built-in defaults
+clime init https://example.com/tools.yaml   # use and record your team's plugin list
 ```
 
 ## AI Agent Skills

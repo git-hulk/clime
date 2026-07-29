@@ -6,6 +6,52 @@ import (
 	"github.com/git-hulk/clime/internal/plugin"
 )
 
+func TestResolveInitSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		args         []string
+		recordedURL  string
+		wantSource   string
+		wantRecorded bool
+	}{
+		{
+			name:        "uses recorded URL without argument",
+			recordedURL: "https://example.com/recorded.yaml",
+			wantSource:  "https://example.com/recorded.yaml",
+		},
+		{
+			name:         "new URL overrides recorded URL",
+			args:         []string{"https://example.com/new.yaml"},
+			recordedURL:  "https://example.com/recorded.yaml",
+			wantSource:   "https://example.com/new.yaml",
+			wantRecorded: true,
+		},
+		{
+			name:        "local path overrides recorded URL without replacing it",
+			args:        []string{"./plugins.yaml"},
+			recordedURL: "https://example.com/recorded.yaml",
+			wantSource:  "./plugins.yaml",
+		},
+		{
+			name: "empty source uses built-in defaults",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSource, gotRecorded := resolveInitSource(tt.args, tt.recordedURL)
+			if gotSource != tt.wantSource {
+				t.Errorf("source = %q, want %q", gotSource, tt.wantSource)
+			}
+			if gotRecorded != tt.wantRecorded {
+				t.Errorf("shouldRecord = %v, want %v", gotRecorded, tt.wantRecorded)
+			}
+		})
+	}
+}
+
 func TestFilterPluginsByTags(t *testing.T) {
 	plugins := []plugin.Plugin{
 		{Name: "core"}, // untagged

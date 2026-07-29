@@ -35,6 +35,7 @@ type ManifestEntry struct {
 
 // Manifest holds the list of managed plugins.
 type Manifest struct {
+	InitURL string          `yaml:"init_url,omitempty"`
 	Plugins []ManifestEntry `yaml:"plugins"`
 }
 

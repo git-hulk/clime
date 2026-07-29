@@ -27,14 +27,29 @@ var initCmd = &cobra.Command{
 	Short: "Install default plugins",
 	Long: `Downloads and installs the organization's default set of plugins.
 
-If a URL is provided, the plugin list is fetched from that remote YAML file.
+If a URL is provided, the plugin list is fetched from that remote YAML file and
+remembered for future runs.
 If a local file path is provided, the plugin list is loaded from that YAML file.
-Otherwise, the built-in default plugin list is used.`,
+Otherwise, the remembered URL is used, falling back to the built-in default
+plugin list when no URL has been recorded.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		plugins, err := resolvePlugins(args)
+		manifest, err := plugin.LoadManifest()
+		if err != nil {
+			manifest = &plugin.Manifest{}
+		}
+
+		source, shouldRecord := resolveInitSource(args, manifest.InitURL)
+		plugins, err := resolvePlugins(source)
 		if err != nil {
 			return err
+		}
+
+		if shouldRecord && source != manifest.InitURL {
+			manifest.InitURL = source
+			if err := manifest.Save(); err != nil {
+				return fmt.Errorf("failed to save init URL: %w", err)
+			}
 		}
 
 		plugins = plugin.FilterByTags(plugins, initTags)
@@ -42,11 +57,6 @@ Otherwise, the built-in default plugin list is used.`,
 		if len(plugins) == 0 {
 			terminal.Warning("No default plugins configured.")
 			return nil
-		}
-
-		manifest, err := plugin.LoadManifest()
-		if err != nil {
-			manifest = &plugin.Manifest{}
 		}
 
 		toInstall, toReinstall, skipped := plugin.CategorizeForInit(plugins, manifest)
@@ -151,16 +161,23 @@ func isURL(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
-// resolvePlugins returns the plugin list to install. If a URL argument is
-// provided, the list is fetched from that remote YAML file. If a local file
-// path is provided, the list is loaded from that file. Otherwise the built-in
-// defaultPlugins slice is returned.
-func resolvePlugins(args []string) ([]plugin.Plugin, error) {
-	if len(args) == 0 {
+// resolveInitSource returns the explicit source argument, or the recorded init
+// URL when no argument is provided. A URL passed explicitly should be recorded
+// after it is fetched successfully.
+func resolveInitSource(args []string, recordedURL string) (source string, shouldRecord bool) {
+	if len(args) > 0 {
+		return args[0], isURL(args[0])
+	}
+	return recordedURL, false
+}
+
+// resolvePlugins returns the plugin list to install. URLs are fetched remotely,
+// local paths are loaded from disk, and an empty source uses built-in defaults.
+func resolvePlugins(source string) ([]plugin.Plugin, error) {
+	if source == "" {
 		return defaultPlugins, nil
 	}
 
-	source := args[0]
 	var (
 		defaults *plugin.PluginList
 		err      error

@@ -2,6 +2,23 @@ package plugin
 
 import "testing"
 
+func TestManifestPersistsInitURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	want := "https://example.com/plugins.yaml"
+	if err := (&Manifest{InitURL: want}).Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := LoadManifest()
+	if err != nil {
+		t.Fatalf("LoadManifest() error = %v", err)
+	}
+	if got.InitURL != want {
+		t.Errorf("InitURL = %q, want %q", got.InitURL, want)
+	}
+}
+
 func TestMigrateRepo(t *testing.T) {
 	t.Parallel()
 
