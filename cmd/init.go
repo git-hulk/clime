@@ -39,7 +39,13 @@ plugin list when no URL has been recorded.`,
 			manifest = &plugin.Manifest{}
 		}
 
-		source, shouldRecord := resolveInitSource(args, manifest.InitURL)
+		source := manifest.InitURL
+		shouldRecord := false
+		if len(args) > 0 {
+			source = args[0]
+			shouldRecord = isURL(source)
+		}
+
 		plugins, err := resolvePlugins(source)
 		if err != nil {
 			return err
@@ -159,16 +165,6 @@ func formatNames(names []string) string {
 func isURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
-}
-
-// resolveInitSource returns the explicit source argument, or the recorded init
-// URL when no argument is provided. A URL passed explicitly should be recorded
-// after it is fetched successfully.
-func resolveInitSource(args []string, recordedURL string) (source string, shouldRecord bool) {
-	if len(args) > 0 {
-		return args[0], isURL(args[0])
-	}
-	return recordedURL, false
 }
 
 // resolvePlugins returns the plugin list to install. URLs are fetched remotely,
