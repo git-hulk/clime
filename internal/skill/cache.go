@@ -4,8 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -117,4 +120,126 @@ func EnsureSnapshot(id RepoID, version string) (string, error) {
 		return "", fmt.Errorf("failed to commit snapshot cache: %w", err)
 	}
 	return dir, nil
+}
+
+// copyTree copies a directory tree, skipping Git metadata.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			if rel == "." {
+				return nil
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return copyFile(path, filepath.Join(dst, rel), info.Mode().Perm())
+	})
+}
+
+func copyFile(src, dst string, perm fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// PurgeCache deletes every committed cache entry that the manifest does not
+// reference, plus leftover temporary fetch directories. Referenced snapshots
+// are never removed. It returns the deleted entry paths.
+func PurgeCache(m *Manifest) ([]string, error) {
+	root, err := cacheRoot()
+	if err != nil {
+		return nil, err
+	}
+	referenced := make(map[string]bool)
+	for _, r := range m.Repos {
+		dir, err := SnapshotDir(r.ID, r.Version)
+		if err != nil {
+			return nil, err
+		}
+		referenced[dir] = true
+	}
+
+	var removed []string
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !d.IsDir() || path == root {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".tmp-") {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if !snapshotReady(path) {
+			return nil
+		}
+		if !referenced[path] {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			removed = append(removed, path)
+		}
+		return filepath.SkipDir
+	})
+	if err != nil {
+		return nil, err
+	}
+	pruneEmptyDirs(root)
+	sort.Strings(removed)
+	return removed, nil
+}
+
+// pruneEmptyDirs removes empty directories left behind after purge.
+func pruneEmptyDirs(root string) {
+	var dirs []string
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && path != root {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	// Deepest first so parents empty out as children are removed.
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err == nil && len(entries) == 0 {
+			os.Remove(dir)
+		}
+	}
 }

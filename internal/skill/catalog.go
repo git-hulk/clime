@@ -64,6 +64,27 @@ func ReadCatalog(dir string) (*Catalog, error) {
 	return nil, fmt.Errorf("no skills catalog found: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json")
 }
 
+// skillContentDir validates that entry's path stays inside the snapshot root
+// and contains SKILL.md, returning the absolute skill directory.
+func skillContentDir(root string, entry SkillEntry) (string, error) {
+	rel := filepath.Clean(strings.TrimPrefix(entry.Path, "./"))
+	if rel == "." {
+		rel = ""
+	}
+	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("skill %q path %q escapes the repository root", entry.Name, entry.Path)
+	}
+	dir := filepath.Join(root, rel)
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("skill %q path %q not found in repository snapshot", entry.Name, entry.Path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		return "", fmt.Errorf("skill %q is missing required SKILL.md at %q", entry.Name, entry.Path)
+	}
+	return dir, nil
+}
+
 // marketplaceFile represents the .claude-plugin/marketplace.json format.
 type marketplaceFile struct {
 	Plugins []marketplacePlugin `json:"plugins"`

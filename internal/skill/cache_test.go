@@ -47,6 +47,33 @@ func TestEnsureSnapshotSupportsMultipleVersions(t *testing.T) {
 	assert.FileExists(t, filepath.Join(v2, "skills", "a-skill", "v2.txt"), "v2 snapshot missing new content")
 }
 
+func TestPurgeCacheDeletesOnlyUnreferencedEntries(t *testing.T) {
+	setTempHome(t)
+	dir := initSkillFixture(t, "a-skill")
+	gitCmd(t, dir, "tag", "v1.0.0")
+	writeSkillFixtureContent(t, dir, "v2", "a-skill")
+	gitCmd(t, dir, "add", "-A")
+	gitCmd(t, dir, "commit", "-q", "-m", "second")
+	gitCmd(t, dir, "tag", "v2.0.0")
+	routeRepos(t, map[string]string{fixtureRepo: dir})
+	id, _ := ParseRepo(fixtureRepo)
+
+	v1, err := EnsureSnapshot(id, "v1.0.0")
+	require.NoError(t, err)
+	v2, err := EnsureSnapshot(id, "v2.0.0")
+	require.NoError(t, err)
+
+	m := newEmptyManifest(filepath.Join(t.TempDir(), "skills.yaml"))
+	_, err = m.AddRepo(fixtureRepo, "v2.0.0", []string{"a-skill"})
+	require.NoError(t, err)
+
+	removed, err := PurgeCache(m)
+	require.NoError(t, err)
+	assert.Equal(t, []string{v1}, removed)
+	assert.NoDirExists(t, v1, "unreferenced entry still exists")
+	assert.True(t, snapshotReady(v2), "referenced entry was deleted")
+}
+
 func TestSafeVersionDistinctForUnsafeNames(t *testing.T) {
 	assert.NotEqual(t, safeVersion("release/v1"), safeVersion("release_v1"),
 		"distinct versions collide in cache addressing")

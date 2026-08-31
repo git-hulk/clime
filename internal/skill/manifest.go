@@ -382,7 +382,7 @@ func (m *Manifest) Save() error {
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameOp(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
