@@ -53,7 +53,10 @@ func LoadManifest() (*Manifest, error) {
 	}
 	m, err := LoadManifestFrom(path)
 	if errors.Is(err, errLegacyManifest) {
-		return nil, fmt.Errorf("%s still uses the legacy skills manifest format: %w", path, err)
+		if err := migrateLegacy(path); err != nil {
+			return nil, fmt.Errorf("failed to migrate legacy skills manifest: %w", err)
+		}
+		return LoadManifestFrom(path)
 	}
 	return m, err
 }

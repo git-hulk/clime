@@ -122,6 +122,51 @@ func EnsureSnapshot(id RepoID, version string) (string, error) {
 	return dir, nil
 }
 
+// commitSnapshotFromDir builds a cache entry by copying an existing local
+// checkout (used by legacy migration). It is a no-op when the entry exists.
+func commitSnapshotFromDir(id RepoID, version, srcDir string) (string, error) {
+	dir, err := SnapshotDir(id, version)
+	if err != nil {
+		return "", err
+	}
+	if snapshotReady(dir) {
+		return dir, nil
+	}
+	root, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp(root, ".tmp-migrate-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := copyTree(srcDir, tmp); err != nil {
+		return "", err
+	}
+	meta, err := json.MarshalIndent(snapshotMeta{Repository: id.Canonical(), Version: version, Commit: version}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, snapshotMetaFile), meta, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dir); err != nil {
+		if snapshotReady(dir) {
+			return dir, nil
+		}
+		return "", fmt.Errorf("failed to commit snapshot cache: %w", err)
+	}
+	return dir, nil
+}
+
 // copyTree copies a directory tree, skipping Git metadata.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
