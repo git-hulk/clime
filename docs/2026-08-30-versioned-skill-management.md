@@ -24,11 +24,11 @@ The current manifest records each installed skill's `source`, `path`, and instal
 
 ### 1. Manifest contract
 
-`~/.clime/skills.yaml` is the only desired-state manifest. A canonical `host/owner/repo` is the top-level key; there is no `schema` field or `repositories` wrapper:
+`~/.clime/skills.yaml` is the only desired-state manifest. A top-level key may use `owner/repo` as shorthand for a repository on `github.com`, or `host/owner/repo` for an explicit host; there is no `schema` field or `repositories` wrapper:
 
 ```yaml
 # Reviewed by the platform team.
-github.com/acme/agent-skills:
+acme/agent-skills:
   version: v1.4.2
   skills:
     - rest-api-design
@@ -51,9 +51,11 @@ clime treats tags as immutable release identifiers supplied by the repository ow
 
 CLI mutations will edit YAML nodes rather than marshal the whole manifest from structs. This preserves user comments and keeps untouched repository entries stable. New repository keys and skill names will use deterministic ordering so an update does not create unrelated diff noise.
 
+clime normalizes repository keys internally before lookup, conflict validation, and cache addressing. `acme/agent-skills` and `github.com/acme/agent-skills` therefore identify the same repository and cannot coexist in one manifest. CLI mutations preserve the spelling of an existing key and do not rewrite it solely to add or remove the optional `github.com/` prefix.
+
 Every install, update, sync, uninstall, and purge operation will validate the complete manifest before contacting a remote or mutating the filesystem:
 
-- Top-level keys must be unique, valid canonical repositories. An `owner/repo` input normalizes to `github.com/owner/repo`.
+- Top-level keys must be valid repository paths and unique after normalization. An `owner/repo` key normalizes to `github.com/owner/repo`; repositories on every other host must include the host.
 - `version` and `skills` must be non-empty, and a repository cannot list the same skill twice.
 - Two repositories cannot select the same skill name because both agent targets install into `<skills-root>/<skill-name>`.
 - Every selected skill must exist in the catalog at the locked version, resolve to a path contained by the repository root, and contain `SKILL.md`.
@@ -127,7 +129,7 @@ If an updated catalog no longer contains any selected skill, the operation fails
 - `clime skills purge` removes cache entries not referenced by the manifest.
 - `clime skills list` shows repositories, locked versions, selected skills, and target state without network access.
 
-The `repo@version` parser recognizes a version suffix after the repository path. In `git@github.com:acme/agent-skills.git@v1.4.2`, it does not treat the first `@`, which belongs to the SSH user, as the version separator. CLI output and errors use a credential-free canonical repository rather than the original transport URL.
+CLI repository arguments accept both the GitHub shorthand `owner/repo` and an explicit `host/owner/repo`. The `repo@version` parser recognizes a version suffix after the repository path. In `git@github.com:acme/agent-skills.git@v1.4.2`, it does not treat the first `@`, which belongs to the SSH user, as the version separator. CLI output and errors use a credential-free canonical repository rather than the original transport URL.
 
 The first version will not support local directories. `clime skills install /local/path` returns an explicit unsupported-source error and does not write `version: local`; mutable working-directory content has no immutable identity, so such a value would falsely imply reproducibility.
 
@@ -156,7 +158,7 @@ Migration alone does not modify installed skill content, so release rollback can
 | Risk | Level | Falsifiable assertion |
 | --- | --- | --- |
 | YAML mutations destroy comments | Unit | After install, update, and uninstall round trips on a manifest with document, repository, and skill comments, comments on untouched nodes and their relative order remain unchanged. |
-| Repository or skill conflicts cause partial writes | Unit + integration | Given duplicate repository keys, duplicate skills, or a cross-source name collision, the command reports every conflict, never invokes the Git runner, and leaves the manifest, cache, and both agent targets byte-for-byte unchanged. |
+| Repository aliases or skill conflicts cause partial writes | Unit + integration | Given both `acme/agent-skills` and `github.com/acme/agent-skills`, duplicate skills, or a cross-source name collision, the command reports every conflict, never invokes the Git runner, and leaves the manifest, cache, and both agent targets byte-for-byte unchanged. |
 | `latest` selects the wrong version | Integration | Given a temporary Git repository with stable, prerelease, and non-SemVer tags, `latest` selects the highest stable SemVer; without a SemVer tag, it stores the default branch's full HEAD SHA. |
 | A branch or short commit remains floating or ambiguous | Integration | After install receives a branch or short commit, the persisted `version` equals the full commit SHA resolved at that time. |
 | The SSH `@` is parsed as a version separator | Unit | `git@host:owner/repo.git@v1.2.3` resolves to the SSH repository plus `v1.2.3`, while an SSH URL without a version produces no false version suffix. |
