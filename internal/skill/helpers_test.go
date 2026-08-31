@@ -73,6 +73,18 @@ func routeRepos(t *testing.T, routes map[string]string) {
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 }
 
+// setTempHome points HOME at a fresh directory and creates the agent target
+// base directories.
+func setTempHome(t *testing.T, agentDirs ...string) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range agentDirs {
+		require.NoError(t, os.MkdirAll(filepath.Join(home, dir), 0o755))
+	}
+	return home
+}
+
 // disableGit makes every Git invocation fail, proving an operation is offline.
 func disableGit(t *testing.T) {
 	t.Helper()
