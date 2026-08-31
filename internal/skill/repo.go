@@ -44,6 +44,7 @@ func (id RepoID) IsZero() bool {
 var (
 	scpLikeRe    = regexp.MustCompile(`^([A-Za-z0-9._-]+)@([A-Za-z0-9._-]+):(.+)$`)
 	fullCommitRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	shortHexRe   = regexp.MustCompile(`^[0-9a-f]{4,39}$`)
 	userinfoRe   = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@`)
 )
 
@@ -147,6 +148,10 @@ func SplitRepoVersion(arg string) (repo, version string) {
 // IsFullCommit reports whether v is a full 40- or 64-character hex commit SHA.
 func IsFullCommit(v string) bool {
 	return fullCommitRe.MatchString(v)
+}
+
+func looksLikeShortCommit(v string) bool {
+	return shortHexRe.MatchString(v)
 }
 
 // SanitizeCredentials removes URL userinfo (user:password@, token@) from s so
