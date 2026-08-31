@@ -10,7 +10,7 @@ References:
 
 - [Go Modules Reference](https://go.dev/ref/mod)
 - [Managing dependencies in Go](https://go.dev/doc/modules/managing-dependencies)
-- [`AfterShip/skills`](https://github.com/AfterShip/skills/tree/master) and its `.claude-plugin/marketplace.json`
+- [Current clime skill catalog implementation](https://github.com/git-hulk/clime/blob/master/internal/skill/github.go)
 
 ## Summary
 
@@ -28,7 +28,7 @@ The current manifest records each installed skill's `source`, `path`, and instal
 
 ```yaml
 # Reviewed by the platform team.
-github.com/AfterShip/skills:
+github.com/acme/agent-skills:
   version: v1.4.2
   skills:
     - rest-api-design
@@ -62,7 +62,7 @@ Validation failure aborts the entire operation before any download, installation
 
 ### 2. Repository catalog
 
-At the locked snapshot, clime will retain the existing catalog precedence: root `skills.yaml` or `skills.yml`, then `.claude-plugin/marketplace.json`, then `.claude-plugin/plugin.json`. This keeps compatibility with current clime behavior and reads the existing `AfterShip/skills` marketplace without requiring repositories to publish a new clime-specific file.
+At the locked snapshot, clime will retain the existing catalog precedence: root `skills.yaml` or `skills.yml`, then `.claude-plugin/marketplace.json`, then `.claude-plugin/plugin.json`. This keeps compatibility with current clime behavior without requiring repositories to publish a new clime-specific file.
 
 The catalog maps a selected skill name to a relative path within the snapshot. The consumer manifest will not persist `path` or `description`; both are derived from a particular repository version, and persisting them would create a second source of truth that may disagree with the catalog.
 
@@ -127,7 +127,7 @@ If an updated catalog no longer contains any selected skill, the operation fails
 - `clime skills purge` removes cache entries not referenced by the manifest.
 - `clime skills list` shows repositories, locked versions, selected skills, and target state without network access.
 
-The `repo@version` parser recognizes a version suffix after the repository path. In `git@github.com:AfterShip/skills.git@v1.4.2`, it does not treat the first `@`, which belongs to the SSH user, as the version separator. CLI output and errors use a credential-free canonical repository rather than the original transport URL.
+The `repo@version` parser recognizes a version suffix after the repository path. In `git@github.com:acme/agent-skills.git@v1.4.2`, it does not treat the first `@`, which belongs to the SSH user, as the version separator. CLI output and errors use a credential-free canonical repository rather than the original transport URL.
 
 The first version will not support local directories. `clime skills install /local/path` returns an explicit unsupported-source error and does not write `version: local`; mutable working-directory content has no immutable identity, so such a value would falsely imply reproducibility.
 
