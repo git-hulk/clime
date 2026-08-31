@@ -107,7 +107,7 @@ This is a test skill.
 	}
 
 	// Verify skill manifest was updated.
-	manifest, err := skill.LoadManifest()
+	manifest, err := skill.LoadLegacyManifest()
 	if err != nil {
 		t.Fatalf("failed to load skill manifest: %v", err)
 	}
@@ -163,7 +163,7 @@ Test.
 	}
 
 	// Pre-populate the skill manifest with the skill already installed.
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "existing-skill", Source: repoDir},
 		},

@@ -8,7 +8,7 @@ import (
 )
 
 func TestSelectInstallCandidatesSkipsInstalledByDefault(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -31,7 +31,7 @@ func TestSelectInstallCandidatesSkipsInstalledByDefault(t *testing.T) {
 }
 
 func TestSelectInstallCandidatesForceIncludesInstalled(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -59,7 +59,7 @@ func TestSelectInstallCandidatesForceIncludesInstalled(t *testing.T) {
 }
 
 func TestSelectInstallCandidatesForceEmptyRepo(t *testing.T) {
-	manifest := &skill.Manifest{}
+	manifest := &skill.LegacyManifest{}
 	if got := selectInstallCandidates(nil, manifest, true); len(got) != 0 {
 		t.Fatalf("candidates = %d, want 0 for empty repo", len(got))
 	}

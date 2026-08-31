@@ -46,7 +46,7 @@ func TestParseRepoManifestYAML(t *testing.T) {
     description: Git workflow automation
     path: skills/git-wizard
 `
-	var manifest RepoManifest
+	var manifest Catalog
 	if err := yaml.Unmarshal([]byte(yamlContent), &manifest); err != nil {
 		t.Fatalf("failed to parse yaml: %v", err)
 	}

@@ -6,7 +6,7 @@ import (
 
 func TestAddSkill(t *testing.T) {
 	t.Parallel()
-	m := &Manifest{}
+	m := &LegacyManifest{}
 
 	m.AddSkill(InstalledSkill{
 		Name:   "my-skill",
@@ -34,7 +34,7 @@ func TestAddSkill(t *testing.T) {
 
 func TestRemoveSkill(t *testing.T) {
 	t.Parallel()
-	m := &Manifest{
+	m := &LegacyManifest{
 		Skills: []InstalledSkill{
 			{Name: "skill-a"},
 			{Name: "skill-b"},
@@ -55,7 +55,7 @@ func TestRemoveSkill(t *testing.T) {
 
 func TestGetSkill(t *testing.T) {
 	t.Parallel()
-	m := &Manifest{
+	m := &LegacyManifest{
 		Skills: []InstalledSkill{{Name: "my-skill", Source: "owner/repo"}},
 	}
 

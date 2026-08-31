@@ -27,7 +27,7 @@ func tryInstallPluginSkills(name string) {
 		return
 	}
 
-	manifest, err := skill.LoadManifest()
+	manifest, err := skill.LoadLegacyManifest()
 	if err != nil {
 		return
 	}
@@ -104,7 +104,7 @@ func discoverPluginSkillSources() []pluginSkillSource {
 // installFromPluginSkills handles the "Plugin Skills" interactive flow.
 // It scans all plugins for skill sources, presents available skills, and
 // installs the user's selections.
-func installFromPluginSkills(manifest *skill.Manifest) error {
+func installFromPluginSkills(manifest *skill.LegacyManifest) error {
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).

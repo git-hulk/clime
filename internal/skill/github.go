@@ -1,28 +1,12 @@
 package skill
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
-
-// SkillEntry describes a skill in a repo's skills.yaml manifest.
-type SkillEntry struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Path        string   `yaml:"path"`
-	Tags        []string `yaml:"tags,omitempty"`
-}
-
-// RepoManifest is the top-level structure of a repo's skills.yaml.
-type RepoManifest struct {
-	Skills []SkillEntry `yaml:"skills"`
-}
 
 // LocalRepoDir resolves repo to a local directory when it already exists on disk.
 // It returns the absolute path, whether the repo was resolved locally, and any error.
@@ -171,184 +155,22 @@ func PrepareRepoDir(repo string) (string, func(), error) {
 	return srcDir, func() {}, nil
 }
 
-// FetchRepoManifest fetches skills from a repo's manifest.
+// FetchRepoManifest fetches the skill catalog from a repo.
 // The repo is always cloned (or updated) into ~/.clime/sources/ so
 // the source is cached locally for subsequent operations.
 // Existing local paths are read directly without cloning.
-func FetchRepoManifest(repo string) (*RepoManifest, error) {
+func FetchRepoManifest(repo string) (*Catalog, error) {
 	dir, cleanup, err := PrepareRepoDir(repo)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
 
-	return readRepoManifestFromDir(dir, repo)
-}
-
-func readRepoManifestFromDir(dir, repo string) (*RepoManifest, error) {
-	// Try skills.yaml / skills.yml first.
-	var data []byte
-	var err error
-	for _, name := range []string{"skills.yaml", "skills.yml"} {
-		data, err = os.ReadFile(filepath.Join(dir, name))
-		if err == nil {
-			break
-		}
-	}
-	if err == nil {
-		var manifest RepoManifest
-		if err := yaml.Unmarshal(data, &manifest); err != nil {
-			return nil, fmt.Errorf("failed to parse skills.yaml: %w", err)
-		}
-		return &manifest, nil
-	}
-
-	// Fall back to .claude-plugin/marketplace.json.
-	if manifest, err := parseMarketplaceManifest(dir); err == nil && len(manifest.Skills) > 0 {
-		return manifest, nil
-	}
-
-	// Fall back to .claude-plugin/plugin.json.
-	if manifest, err := parsePluginManifest(dir); err == nil && len(manifest.Skills) > 0 {
-		return manifest, nil
-	}
-
-	return nil, fmt.Errorf("no skills manifest found in %s: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json", repo)
-}
-
-// marketplaceFile represents the .claude-plugin/marketplace.json format.
-type marketplaceFile struct {
-	Plugins []marketplacePlugin `json:"plugins"`
-}
-
-type marketplacePlugin struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Source      string   `json:"source"`
-	Skills      []string `json:"skills"`
-}
-
-// parseMarketplaceManifest reads .claude-plugin/marketplace.json from a local directory
-// and builds a RepoManifest by reading each skill's SKILL.md frontmatter.
-func parseMarketplaceManifest(dir string) (*RepoManifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "marketplace.json"))
+	catalog, err := ReadCatalog(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", repo, err)
 	}
-
-	var mf marketplaceFile
-	if err := json.Unmarshal(data, &mf); err != nil {
-		return nil, fmt.Errorf("failed to parse marketplace.json: %w", err)
-	}
-
-	var manifest RepoManifest
-	seen := make(map[string]bool)
-	for _, plugin := range mf.Plugins {
-		sourceDir := strings.TrimPrefix(plugin.Source, "./")
-		for _, skillPath := range plugin.Skills {
-			skillPath = strings.TrimPrefix(skillPath, "./")
-			if sourceDir != "" {
-				skillPath = filepath.Join(sourceDir, skillPath)
-			}
-			if seen[skillPath] {
-				continue
-			}
-			seen[skillPath] = true
-
-			entry := SkillEntry{Path: skillPath}
-			if fm, err := readSkillFrontmatter(filepath.Join(dir, skillPath, "SKILL.md")); err == nil {
-				entry.Name = fm.Name
-				entry.Description = fm.Description
-			}
-			if entry.Name == "" {
-				entry.Name = filepath.Base(skillPath)
-			}
-			manifest.Skills = append(manifest.Skills, entry)
-		}
-	}
-	return &manifest, nil
-}
-
-// pluginFile represents the .claude-plugin/plugin.json format.
-type pluginFile struct {
-	Name   string `json:"name"`
-	Skills string `json:"skills"`
-}
-
-// parsePluginManifest reads .claude-plugin/plugin.json from a local directory
-// and discovers skills by scanning the skills directory it references.
-func parsePluginManifest(dir string) (*RepoManifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
-	if err != nil {
-		return nil, err
-	}
-
-	var pf pluginFile
-	if err := json.Unmarshal(data, &pf); err != nil {
-		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
-	}
-	if pf.Skills == "" {
-		return nil, fmt.Errorf("plugin.json has no skills directory")
-	}
-
-	skillsDir := strings.TrimPrefix(pf.Skills, "./")
-	entries, err := os.ReadDir(filepath.Join(dir, skillsDir))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read skills directory: %w", err)
-	}
-
-	var manifest RepoManifest
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		skillPath := filepath.Join(skillsDir, e.Name())
-		entry := SkillEntry{Path: skillPath}
-		if fm, err := readSkillFrontmatter(filepath.Join(dir, skillPath, "SKILL.md")); err == nil {
-			entry.Name = fm.Name
-			entry.Description = fm.Description
-		}
-		if entry.Name == "" {
-			entry.Name = e.Name()
-		}
-		manifest.Skills = append(manifest.Skills, entry)
-	}
-	return &manifest, nil
-}
-
-// skillFrontmatter holds the YAML frontmatter from a SKILL.md file.
-type skillFrontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-}
-
-// parseSkillFrontmatter parses the YAML frontmatter between --- markers from SKILL.md content.
-func parseSkillFrontmatter(data []byte) (*skillFrontmatter, error) {
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-	var fmLines []string
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		fmLines = append(fmLines, line)
-	}
-	var fm skillFrontmatter
-	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
-		return nil, err
-	}
-	return &fm, nil
-}
-
-// readSkillFrontmatter reads and parses the YAML frontmatter from a SKILL.md file on disk.
-func readSkillFrontmatter(path string) (*skillFrontmatter, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return parseSkillFrontmatter(data)
+	return catalog, nil
 }
 
 // CloneRepo clones (or updates) a repo into ~/.clime/sources/ and returns the path.

@@ -18,13 +18,13 @@ type InstalledSkill struct {
 	InstalledAt time.Time `yaml:"installed_at"`
 }
 
-// Manifest holds installed skills and known sources.
-type Manifest struct {
+// LegacyManifest holds installed skills and known sources.
+type LegacyManifest struct {
 	Skills  []InstalledSkill `yaml:"skills"`
 	Sources []string         `yaml:"sources,omitempty"`
 }
 
-func manifestPath() (string, error) {
+func legacyManifestPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -32,17 +32,17 @@ func manifestPath() (string, error) {
 	return filepath.Join(home, ".clime", "skills.yaml"), nil
 }
 
-// LoadManifest reads the skills manifest from ~/.clime/skills.yaml.
+// LoadLegacyManifest reads the skills manifest from ~/.clime/skills.yaml.
 // Creates the directory and an empty manifest file if they do not exist.
-func LoadManifest() (*Manifest, error) {
-	path, err := manifestPath()
+func LoadLegacyManifest() (*LegacyManifest, error) {
+	path, err := legacyManifestPath()
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine manifest path: %w", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			m := &Manifest{}
+			m := &LegacyManifest{}
 			if err := m.Save(); err != nil {
 				return nil, fmt.Errorf("failed to create skills manifest: %w", err)
 			}
@@ -50,7 +50,7 @@ func LoadManifest() (*Manifest, error) {
 		}
 		return nil, err
 	}
-	var m Manifest
+	var m LegacyManifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
@@ -58,8 +58,8 @@ func LoadManifest() (*Manifest, error) {
 }
 
 // Save writes the manifest to disk.
-func (m *Manifest) Save() error {
-	path, err := manifestPath()
+func (m *LegacyManifest) Save() error {
+	path, err := legacyManifestPath()
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (m *Manifest) Save() error {
 }
 
 // AddSkill adds or updates an installed skill entry.
-func (m *Manifest) AddSkill(s InstalledSkill) {
+func (m *LegacyManifest) AddSkill(s InstalledSkill) {
 	for i, existing := range m.Skills {
 		if existing.Name == s.Name {
 			m.Skills[i] = s
@@ -85,7 +85,7 @@ func (m *Manifest) AddSkill(s InstalledSkill) {
 }
 
 // RemoveSkill removes an installed skill entry.
-func (m *Manifest) RemoveSkill(name string) bool {
+func (m *LegacyManifest) RemoveSkill(name string) bool {
 	for i, s := range m.Skills {
 		if s.Name == name {
 			m.Skills = append(m.Skills[:i], m.Skills[i+1:]...)
@@ -96,7 +96,7 @@ func (m *Manifest) RemoveSkill(name string) bool {
 }
 
 // GetSkill returns an installed skill by name.
-func (m *Manifest) GetSkill(name string) (InstalledSkill, bool) {
+func (m *LegacyManifest) GetSkill(name string) (InstalledSkill, bool) {
 	for _, s := range m.Skills {
 		if s.Name == name {
 			return s, true
@@ -106,7 +106,7 @@ func (m *Manifest) GetSkill(name string) (InstalledSkill, bool) {
 }
 
 // AddSource adds a source to the known sources list if not already present.
-func (m *Manifest) AddSource(source string) {
+func (m *LegacyManifest) AddSource(source string) {
 	for _, s := range m.Sources {
 		if s == source {
 			return
@@ -116,7 +116,7 @@ func (m *Manifest) AddSource(source string) {
 }
 
 // RemoveSource removes a source from the known sources list.
-func (m *Manifest) RemoveSource(source string) bool {
+func (m *LegacyManifest) RemoveSource(source string) bool {
 	for i, s := range m.Sources {
 		if s == source {
 			m.Sources = append(m.Sources[:i], m.Sources[i+1:]...)

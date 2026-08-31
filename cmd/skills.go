@@ -34,7 +34,7 @@ var skillsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List installed skills and their sources",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadLegacyManifest()
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -135,7 +135,7 @@ var skillsInstallCmd = &cobra.Command{
 	Short: "Install skills from a GitHub repository or local path",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadLegacyManifest()
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -154,7 +154,7 @@ var skillsInstallCmd = &cobra.Command{
 	},
 }
 
-func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
+func runInteractiveSkillsInstall(manifest *skill.LegacyManifest) error {
 	sources := uniqueSkillSources(manifest)
 	if len(sources) == 0 {
 		fmt.Println()
@@ -224,7 +224,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 	}
 }
 
-func uniqueSkillSources(manifest *skill.Manifest) []string {
+func uniqueSkillSources(manifest *skill.LegacyManifest) []string {
 	// Collect unique sources from installed skills and tracked sources, preserving order.
 	seen := make(map[string]bool)
 	var sources []string
@@ -244,7 +244,7 @@ func uniqueSkillSources(manifest *skill.Manifest) []string {
 	return sources
 }
 
-func runSkillsSourceAction(manifest *skill.Manifest, repo string, action sourceAction) error {
+func runSkillsSourceAction(manifest *skill.LegacyManifest, repo string, action sourceAction) error {
 	if err := validateSkillRepoSource(repo); err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 }
 
 // removeSource uninstalls all skills from the given source and removes it from the manifest.
-func removeSource(manifest *skill.Manifest, repo string) error {
+func removeSource(manifest *skill.LegacyManifest, repo string) error {
 	var names []string
 	for _, s := range manifest.Skills {
 		if s.Source == repo {
@@ -330,7 +330,7 @@ func removeSource(manifest *skill.Manifest, repo string) error {
 }
 
 // updateSource re-installs all skills from the given source with the latest files.
-func updateSource(manifest *skill.Manifest, repo string) error {
+func updateSource(manifest *skill.LegacyManifest, repo string) error {
 	var installed []skill.InstalledSkill
 	for _, s := range manifest.Skills {
 		if s.Source == repo {
@@ -379,7 +379,7 @@ func updateSource(manifest *skill.Manifest, repo string) error {
 	return nil
 }
 
-func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo string, localDir string) error {
+func installSkillEntry(manifest *skill.LegacyManifest, entry *skill.SkillEntry, repo string, localDir string) error {
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
@@ -431,7 +431,7 @@ type installCandidate struct {
 // selectInstallCandidates returns the repo skills that should be offered for
 // installation. Already-installed skills are skipped unless force is set, in
 // which case they are included and their label is marked "(reinstall)".
-func selectInstallCandidates(repoSkills []skill.SkillEntry, manifest *skill.Manifest, force bool) []installCandidate {
+func selectInstallCandidates(repoSkills []skill.SkillEntry, manifest *skill.LegacyManifest, force bool) []installCandidate {
 	var candidates []installCandidate
 	for _, s := range repoSkills {
 		_, installed := manifest.GetSkill(s.Name)
@@ -453,7 +453,7 @@ func selectInstallCandidates(repoSkills []skill.SkillEntry, manifest *skill.Mani
 // installFromRepo fetches skills from a repo and lets the user pick which to install.
 // When force is true, skills that are already installed are kept in the list
 // (instead of being filtered out) so they can be reinstalled and overwritten.
-func installFromRepo(manifest *skill.Manifest, repo string, force bool) error {
+func installFromRepo(manifest *skill.LegacyManifest, repo string, force bool) error {
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
@@ -529,7 +529,7 @@ var skillsUninstallCmd = &cobra.Command{
 	Short: "Uninstall a previously installed skill",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadLegacyManifest()
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -542,7 +542,7 @@ var skillsUninstallCmd = &cobra.Command{
 	},
 }
 
-func uninstallByName(manifest *skill.Manifest, name string) error {
+func uninstallByName(manifest *skill.LegacyManifest, name string) error {
 	if _, exists := manifest.GetSkill(name); !exists {
 		return fmt.Errorf("skill %q is not installed", name)
 	}
@@ -568,7 +568,7 @@ func uninstallByName(manifest *skill.Manifest, name string) error {
 	return nil
 }
 
-func interactiveUninstall(manifest *skill.Manifest) error {
+func interactiveUninstall(manifest *skill.LegacyManifest) error {
 	if len(manifest.Skills) == 0 {
 		terminal.Warning("No skills installed.")
 		return nil

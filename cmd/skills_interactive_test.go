@@ -12,7 +12,7 @@ import (
 )
 
 func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -48,7 +48,7 @@ func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.
 		gotRepo   string
 		gotAction sourceAction
 	)
-	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
+	skillsActionRunner = func(manifest *skill.LegacyManifest, repo string, action sourceAction) error {
 		gotRepo = repo
 		gotAction = action
 		return nil
@@ -66,7 +66,7 @@ func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.
 }
 
 func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -96,7 +96,7 @@ func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
 	}
 
 	called := false
-	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
+	skillsActionRunner = func(manifest *skill.LegacyManifest, repo string, action sourceAction) error {
 		called = true
 		if repo != "new/repo" {
 			t.Fatalf("repo = %q, want %q", repo, "new/repo")
@@ -118,7 +118,7 @@ func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
 }
 
 func TestRunInteractiveSkillsInstallEscFromInstallDoesNotPrintExtraSpacer(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -144,7 +144,7 @@ func TestRunInteractiveSkillsInstallEscFromInstallDoesNotPrintExtraSpacer(t *tes
 	}
 
 	runs := 0
-	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
+	skillsActionRunner = func(manifest *skill.LegacyManifest, repo string, action sourceAction) error {
 		runs++
 		if runs == 1 {
 			return prompt.ErrBack
@@ -166,7 +166,7 @@ func TestRunInteractiveSkillsInstallEscFromInstallDoesNotPrintExtraSpacer(t *tes
 }
 
 func TestInteractiveUninstallEscKeepsMenuOpen(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha"},
 		},
@@ -201,7 +201,7 @@ func TestInteractiveUninstallEscKeepsMenuOpen(t *testing.T) {
 }
 
 func TestInteractiveUninstallInterruptPropagates(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha"},
 		},
@@ -252,7 +252,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	return output
 }
 func TestRunInteractiveSkillsInstallEscFromInstallReturnsToActionMenu(t *testing.T) {
-	manifest := &skill.Manifest{
+	manifest := &skill.LegacyManifest{
 		Skills: []skill.InstalledSkill{
 			{Name: "alpha", Source: "owner/repo"},
 		},
@@ -278,7 +278,7 @@ func TestRunInteractiveSkillsInstallEscFromInstallReturnsToActionMenu(t *testing
 	}
 
 	var actions []sourceAction
-	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
+	skillsActionRunner = func(manifest *skill.LegacyManifest, repo string, action sourceAction) error {
 		actions = append(actions, action)
 		if len(actions) == 1 {
 			return prompt.ErrBack
