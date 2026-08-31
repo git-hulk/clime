@@ -87,15 +87,29 @@ This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/`.
 
 ### Skills from repositories
 
-Install, list, and uninstall skills from GitHub repositories or local paths:
+Skills come from Git repositories locked to a version. `~/.clime/skills.yaml`
+declares each repository, its locked version (a tag or full commit SHA), and
+the selected skills; snapshots are cached immutably under `~/.clime/cache`:
 
 ```sh
-clime skills install owner/repo    # browse and install skills from a repo
-clime skills install /local/path   # install from a local directory
-clime skills install               # interactive mode — pick a source and skills
-clime skills list                  # list installed skills
-clime skills uninstall <name>      # remove a skill
+clime skills install owner/repo            # browse and install at the latest version
+clime skills install owner/repo@v1.4.2     # lock to a tag, branch, or commit
+clime skills install host/owner/repo       # repositories on other Git hosts
+clime skills install                       # interactive mode — pick a source and skills
+clime skills update                        # update every repository to latest
+clime skills update owner/repo@v2.0.0      # update one repository to a specific version
+clime skills sync                          # reconcile targets with the locked versions (offline when cached)
+clime skills list                          # list repositories, versions, skills, and target state
+clime skills uninstall <name>              # remove a skill (and its repo entry when it is the last one)
+clime skills purge                         # delete cache entries the manifest no longer references
 ```
+
+`latest` resolves to the highest stable SemVer tag, or the default branch's
+commit when the repository has no SemVer tags; branches and short commits are
+locked to the full commit SHA. Private repositories use the authentication
+already configured for Git (SSH agent, credential helper, `.netrc`,
+`gh auth setup-git`) — clime never stores or prints credentials. Local
+directories are not supported: publish the skill in a Git repository.
 
 ## Shell Completions
 

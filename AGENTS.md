@@ -6,7 +6,7 @@
 - `internal/`: non-exported packages:
   - `plugin/` for plugin discovery/exec + manifest handling (`~/.clime/plugins.yaml`).
   - `installer/` for plugin install/update/uninstall across sources (GitHub, npm, Homebrew, script).
-  - `skill/` for AI agent skill install/uninstall + manifest handling (`~/.clime/skills.yaml`).
+  - `skill/` for repository-versioned AI agent skill management: repo identity/version parsing, Git transport, immutable snapshot cache (`~/.clime/cache`), transactional apply to agent targets, and the repository-keyed manifest (`~/.clime/skills.yaml`).
   - `selfupdate/` for CLI self-update flow.
   - `githubrelease/` shared GitHub release fetch/extract helpers.
   - `prompt/` for interactive terminal prompts (select, input, multiselect).

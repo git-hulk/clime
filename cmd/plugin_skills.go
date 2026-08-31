@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
@@ -19,48 +18,57 @@ const pluginSkillsOption = "Plugin Skills"
 var pluginSkillInstaller = tryInstallPluginSkills
 
 // tryInstallPluginSkills invokes `clime-<name> skills` to discover a skill
-// source from the plugin. If the plugin provides skills, they are automatically
-// installed. Errors are silently ignored so plugin installation is never blocked.
+// source from the plugin. If the plugin provides skills, they are installed
+// at the repository's latest version. Errors are silently ignored so plugin
+// installation is never blocked.
 func tryInstallPluginSkills(name string) {
 	source := getPluginSkillSource(name)
 	if source == "" {
 		return
 	}
 
-	manifest, err := skill.LoadLegacyManifest()
+	id, err := skill.ParseRepo(source)
+	if err != nil {
+		return
+	}
+	manifest, err := skill.LoadManifest()
 	if err != nil {
 		return
 	}
 
-	repoManifest, err := skill.FetchRepoManifest(source)
+	version := ""
+	if r := manifest.FindRepo(id); r != nil {
+		version = r.Version
+	} else if version, err = skill.ResolveVersion(id, ""); err != nil {
+		return
+	}
+	snapDir, err := skill.EnsureSnapshot(id, version)
+	if err != nil {
+		return
+	}
+	catalog, err := skill.ReadCatalog(snapDir)
 	if err != nil {
 		return
 	}
 
-	dir, cleanup, err := skill.PrepareRepoDir(source)
-	if err != nil {
-		return
-	}
-	defer cleanup()
-
-	for _, entry := range repoManifest.Skills {
-		if _, installed := manifest.GetSkill(entry.Name); installed {
-			continue
+	var names []string
+	for _, entry := range catalog.Skills {
+		if manifest.FindSkill(entry.Name) == nil {
+			names = append(names, entry.Name)
 		}
-		targets, err := skill.InstallFromDir(entry.Name, dir, entry.Path)
-		if err != nil || len(targets) == 0 {
-			continue
-		}
-		manifest.AddSkill(skill.InstalledSkill{
-			Name:        entry.Name,
-			Description: entry.Description,
-			Source:      source,
-			Path:        entry.Path,
-			InstalledAt: time.Now(),
-		})
-		manifest.Save()
-		terminal.Successf("Installed plugin skill %q to %s", entry.Name, strings.Join(targets, ", "))
 	}
+	if len(names) == 0 {
+		return
+	}
+
+	key := id.DisplayKey()
+	if r := manifest.FindRepo(id); r != nil {
+		key = r.Key
+	}
+	if err := applySelection(manifest, id, key, version, names); err != nil {
+		return
+	}
+	terminal.Successf("Installed plugin skill(s) %s from %s", strings.Join(names, ", "), key)
 }
 
 // getPluginSkillSource runs `clime-<name> skills` and returns the trimmed
@@ -78,7 +86,7 @@ func getPluginSkillSource(name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// pluginSkillSource pairs a plugin name with its skill source path/repo.
+// pluginSkillSource pairs a plugin name with its skill source repository.
 type pluginSkillSource struct {
 	pluginName string
 	source     string
@@ -103,8 +111,8 @@ func discoverPluginSkillSources() []pluginSkillSource {
 
 // installFromPluginSkills handles the "Plugin Skills" interactive flow.
 // It scans all plugins for skill sources, presents available skills, and
-// installs the user's selections.
-func installFromPluginSkills(manifest *skill.LegacyManifest) error {
+// installs the user's selections at each repository's resolved version.
+func installFromPluginSkills(manifest *skill.Manifest) error {
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
@@ -118,25 +126,39 @@ func installFromPluginSkills(manifest *skill.LegacyManifest) error {
 		return nil
 	}
 
-	// Collect skills from all plugin sources.
+	// Collect installable skills from all plugin sources.
+	type pluginRepo struct {
+		id      skill.RepoID
+		version string
+	}
 	type skillCandidate struct {
-		entry  skill.SkillEntry
-		source string
-		label  string
+		name  string
+		repo  pluginRepo
+		label string
 	}
 	var candidates []skillCandidate
-	var dirs []struct {
-		dir     string
-		cleanup func()
-	}
 
 	for _, ps := range sources {
-		repoManifest, err := skill.FetchRepoManifest(ps.source)
+		id, err := skill.ParseRepo(ps.source)
 		if err != nil {
 			continue
 		}
-		for _, entry := range repoManifest.Skills {
-			if _, installed := manifest.GetSkill(entry.Name); installed {
+		version := ""
+		if r := manifest.FindRepo(id); r != nil {
+			version = r.Version
+		} else if version, err = skill.ResolveVersion(id, ""); err != nil {
+			continue
+		}
+		snapDir, err := skill.EnsureSnapshot(id, version)
+		if err != nil {
+			continue
+		}
+		catalog, err := skill.ReadCatalog(snapDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range catalog.Skills {
+			if manifest.FindSkill(entry.Name) != nil {
 				continue
 			}
 			label := fmt.Sprintf("%s — %s", entry.Name, ps.pluginName)
@@ -144,9 +166,9 @@ func installFromPluginSkills(manifest *skill.LegacyManifest) error {
 				label = fmt.Sprintf("%s — %s (%s)", entry.Name, uicli.TruncateString(entry.Description, 50), ps.pluginName)
 			}
 			candidates = append(candidates, skillCandidate{
-				entry:  entry,
-				source: ps.source,
-				label:  label,
+				name:  entry.Name,
+				repo:  pluginRepo{id: id, version: version},
+				label: label,
 			})
 		}
 	}
@@ -178,47 +200,35 @@ func installFromPluginSkills(manifest *skill.LegacyManifest) error {
 		return nil
 	}
 
-	// Group selected skills by source to prepare repos efficiently.
-	type sourceSkills struct {
-		source  string
-		entries []skill.SkillEntry
+	// Group selected skills by repository so each is applied once.
+	type repoSelection struct {
+		repo  pluginRepo
+		names []string
 	}
-	sourceMap := make(map[string]*sourceSkills)
+	selections := make(map[string]*repoSelection)
+	var order []string
 	for _, idx := range selectedIdxs {
 		c := candidates[idx]
-		ss, ok := sourceMap[c.source]
+		canonical := c.repo.id.Canonical()
+		sel, ok := selections[canonical]
 		if !ok {
-			ss = &sourceSkills{source: c.source}
-			sourceMap[c.source] = ss
+			sel = &repoSelection{repo: c.repo}
+			selections[canonical] = sel
+			order = append(order, canonical)
 		}
-		ss.entries = append(ss.entries, c.entry)
+		sel.names = append(sel.names, c.name)
 	}
 
 	fmt.Println()
-	for _, ss := range sourceMap {
-		dir, cleanup, err := skill.PrepareRepoDir(ss.source)
-		if err != nil {
-			terminal.Errorf("Failed to prepare %q: %v", ss.source, err)
-			continue
+	for _, canonical := range order {
+		sel := selections[canonical]
+		key := sel.repo.id.DisplayKey()
+		if r := manifest.FindRepo(sel.repo.id); r != nil {
+			key = r.Key
 		}
-		dirs = append(dirs, struct {
-			dir     string
-			cleanup func()
-		}{dir, cleanup})
-
-		manifest.AddSource(ss.source)
-		manifest.Save()
-
-		for _, entry := range ss.entries {
-			if err := installSkillEntry(manifest, &entry, ss.source, dir); err != nil {
-				terminal.Errorf("Failed to install %q: %v", entry.Name, err)
-			}
+		if err := applySelection(manifest, sel.repo.id, key, sel.repo.version, sel.names); err != nil {
+			terminal.Errorf("Failed to install from %s: %v", key, err)
 		}
 	}
-
-	for _, d := range dirs {
-		d.cleanup()
-	}
-
 	return nil
 }

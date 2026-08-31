@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/git-hulk/clime/internal/skill"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTryInstallPluginSkillsPluginNotFound(t *testing.T) {
@@ -20,9 +22,7 @@ func TestTryInstallPluginSkillsNoSkillsSubcommand(t *testing.T) {
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "clime-noskills")
 	script := "#!/bin/sh\nexit 1\n"
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
@@ -36,9 +36,7 @@ func TestTryInstallPluginSkillsEmptyOutput(t *testing.T) {
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "clime-emptyskills")
 	script := "#!/bin/sh\necho ''\n"
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
@@ -47,139 +45,77 @@ func TestTryInstallPluginSkillsEmptyOutput(t *testing.T) {
 	tryInstallPluginSkills("emptyskills")
 }
 
-func TestTryInstallPluginSkillsInstallsFromSource(t *testing.T) {
-	// Set up a fake skill repo with a skills.yaml and a SKILL.md.
+func TestTryInstallPluginSkillsLocalPathSourceIgnored(t *testing.T) {
+	newTestHome(t)
 	repoDir := t.TempDir()
-	skillDir := filepath.Join(repoDir, "skills", "test-skill")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 
-	skillsYAML := `skills:
-  - name: test-skill
-    description: A test skill
-    path: skills/test-skill
-`
-	if err := os.WriteFile(filepath.Join(repoDir, "skills.yaml"), []byte(skillsYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	skillMD := `---
-name: test-skill
-description: A test skill
----
-This is a test skill.
-`
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a fake plugin binary that outputs the repo dir as the skill source.
 	binDir := t.TempDir()
-	binPath := filepath.Join(binDir, "clime-withskills")
+	binPath := filepath.Join(binDir, "clime-localskills")
 	script := "#!/bin/sh\necho '" + repoDir + "'\n"
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
 
-	// Set up a temp home directory so skill installs don't touch the real home.
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	// Local directories have no immutable identity; the plugin flow skips
+	// them silently and installs nothing.
+	tryInstallPluginSkills("localskills")
 
-	// Create .claude and .codex directories so installFiles writes to them.
-	for _, dir := range []string{".claude", ".codex"} {
-		if err := os.MkdirAll(filepath.Join(homeDir, dir), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	manifest, err := skill.LoadManifest()
+	require.NoError(t, err)
+	assert.Empty(t, manifest.Repos, "manifest gained repositories from a local path source")
+}
+
+func TestTryInstallPluginSkillsInstallsFromSource(t *testing.T) {
+	home := newTestHome(t)
+	newSkillFixture(t, "test-skill")
+
+	// Create a fake plugin binary that outputs the repo as the skill source.
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "clime-withskills")
+	script := "#!/bin/sh\nif [ \"$1\" = skills ]; then echo '" + testRepo + "'; fi\n"
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
 
 	tryInstallPluginSkills("withskills")
 
 	// Verify skill files were installed.
 	for _, dir := range []string{".claude", ".codex"} {
-		installed := filepath.Join(homeDir, dir, "skills", "test-skill", "SKILL.md")
-		if _, err := os.Stat(installed); err != nil {
-			t.Errorf("expected skill file at %s, got error: %v", installed, err)
-		}
+		assert.FileExists(t, filepath.Join(home, dir, "skills", "test-skill", "SKILL.md"))
 	}
 
-	// Verify skill manifest was updated.
-	manifest, err := skill.LoadLegacyManifest()
-	if err != nil {
-		t.Fatalf("failed to load skill manifest: %v", err)
-	}
-	if _, found := manifest.GetSkill("test-skill"); !found {
-		t.Error("expected test-skill to be in the skill manifest")
-	}
+	// Verify the manifest locks the repository to the latest version.
+	manifest, err := skill.LoadManifest()
+	require.NoError(t, err)
+	require.NotNil(t, manifest.FindSkill("test-skill"), "expected test-skill in the skill manifest")
+	require.Len(t, manifest.Repos, 1)
+	assert.Equal(t, "v1.0.0", manifest.Repos[0].Version, "want the latest stable tag locked")
 }
 
 func TestTryInstallPluginSkillsSkipsAlreadyInstalled(t *testing.T) {
-	// Set up a fake skill repo.
-	repoDir := t.TempDir()
-	skillDir := filepath.Join(repoDir, "skills", "existing-skill")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	home := newTestHome(t)
+	newSkillFixture(t, "existing-skill")
 
-	skillsYAML := `skills:
-  - name: existing-skill
-    description: Already installed
-    path: skills/existing-skill
-`
-	if err := os.WriteFile(filepath.Join(repoDir, "skills.yaml"), []byte(skillsYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	skillMD := `---
-name: existing-skill
-description: Already installed
----
-Test.
-`
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a fake plugin binary.
 	binDir := t.TempDir()
 	binPath := filepath.Join(binDir, "clime-skipskills")
-	script := "#!/bin/sh\necho '" + repoDir + "'\n"
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
+	script := "#!/bin/sh\nif [ \"$1\" = skills ]; then echo '" + testRepo + "'; fi\n"
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
 
-	// Set up temp home with .claude dir.
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	// Pre-populate the manifest with the skill already selected.
+	manifest, err := skill.LoadManifest()
+	require.NoError(t, err)
+	_, err = manifest.AddRepo(testRepo, "v1.0.0", []string{"existing-skill"})
+	require.NoError(t, err)
+	require.NoError(t, manifest.Save())
 
-	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Pre-populate the skill manifest with the skill already installed.
-	manifest := &skill.LegacyManifest{
-		Skills: []skill.InstalledSkill{
-			{Name: "existing-skill", Source: repoDir},
-		},
-	}
-	if err := manifest.Save(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Run tryInstallPluginSkills — it should skip the already-installed skill.
+	// Run tryInstallPluginSkills — every catalog skill is already
+	// selected, so nothing is installed.
 	tryInstallPluginSkills("skipskills")
 
-	// The skill directory under .claude should NOT exist since it was skipped.
-	installed := filepath.Join(homeDir, ".claude", "skills", "existing-skill", "SKILL.md")
-	if _, err := os.Stat(installed); err == nil {
-		t.Error("expected skill file NOT to be written for already-installed skill")
-	}
+	assert.NoFileExists(t, filepath.Join(home, ".claude", "skills", "existing-skill", "SKILL.md"),
+		"skill file should not be written for an already-installed skill")
 }
 
 func TestPluginSkillInstallerCalledFromExecutePluginInstall(t *testing.T) {
@@ -191,14 +127,6 @@ func TestPluginSkillInstallerCalledFromExecutePluginInstall(t *testing.T) {
 		skillInstallerCalledWith = name
 	}
 
-	// Stub the real install to avoid actual installation.
-	// We need to test the real executePluginInstall, but it calls installer.FromPlugin
-	// which we can't easily stub. Instead, test via the pluginInstallRunner path:
-	// the interactive flow calls pluginInstallRunner which defaults to executePluginInstall.
-	// Since executePluginInstall calls pluginSkillInstaller, we verify indirectly.
-	//
-	// For a direct test, we verify the variable is wired up correctly.
-	if skillInstallerCalledWith != "" {
-		t.Fatal("pluginSkillInstaller should not have been called yet")
-	}
+	// Verify the variable is wired up correctly.
+	assert.Empty(t, skillInstallerCalledWith, "pluginSkillInstaller should not have been called yet")
 }

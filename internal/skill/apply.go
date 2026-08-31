@@ -17,6 +17,12 @@ const (
 	backupDirName  = ".clime-backup"
 )
 
+// targetName maps a dot-directory name to a display-friendly target name.
+var targetName = map[string]string{
+	".claude": "claude",
+	".codex":  "codex",
+}
+
 // agentTargets returns the agent base directories (~/.claude, ~/.codex) that
 // exist on this machine.
 func agentTargets() ([]string, error) {
