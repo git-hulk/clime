@@ -87,15 +87,28 @@ This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/`.
 
 ### Skills from repositories
 
-Install, list, and uninstall skills from GitHub repositories or local paths:
+Install, update, sync, list, and uninstall skills from GitHub repositories or local paths:
 
 ```sh
-clime skills install owner/repo    # browse and install skills from a repo
-clime skills install /local/path   # install from a local directory
-clime skills install               # interactive mode — pick a source and skills
-clime skills list                  # list installed skills
-clime skills uninstall <name>      # remove a skill
+clime skills install owner/repo         # browse and install skills (same as @latest)
+clime skills install owner/repo@latest  # highest stable semver tag, like go get
+clime skills install owner/repo@v1      # highest v1.x.y tag
+clime skills install owner/repo@v1.2.3  # pin to a tag, branch, or commit SHA
+clime skills install /local/path        # install from a local directory
+clime skills install                    # interactive mode — pick a source and skills
+clime skills update                     # update every source to its latest version
+clime skills update owner/repo          # update one source to latest
+clime skills update owner/repo@v1.2.3   # move one source to a specific version
+clime skills sync                       # reinstall skills at the versions locked in the manifest
+clime skills list                       # list installed skills
+clime skills uninstall <name>           # remove a skill
 ```
+
+The manifest at `~/.clime/skills.yaml` records each source's locked version. `sync`
+applies those versions as-is (from the local cache when available, so it works
+offline), while `update` resolves a newer version and rewrites the lock. An update
+is refused when the new version no longer provides an installed skill, so skills
+are never removed implicitly.
 
 ## Shell Completions
 

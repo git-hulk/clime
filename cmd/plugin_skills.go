@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/plugin"
@@ -37,12 +36,13 @@ func tryInstallPluginSkills(name string) {
 		return
 	}
 
-	dir, cleanup, err := skill.PrepareRepoDir(source)
+	dir, version, cleanup, err := skill.PrepareRepoDir(source)
 	if err != nil {
 		return
 	}
 	defer cleanup()
 
+	sourceRepo, _ := skill.ParseSourceVersion(source)
 	for _, entry := range repoManifest.Skills {
 		if _, installed := manifest.GetSkill(entry.Name); installed {
 			continue
@@ -51,12 +51,13 @@ func tryInstallPluginSkills(name string) {
 		if err != nil || len(targets) == 0 {
 			continue
 		}
+		if version != "" {
+			manifest.SetSourceVersion(sourceRepo, version)
+		}
 		manifest.AddSkill(skill.InstalledSkill{
-			Name:        entry.Name,
-			Description: entry.Description,
-			Source:      source,
-			Path:        entry.Path,
-			InstalledAt: time.Now(),
+			Name:   entry.Name,
+			Source: sourceRepo,
+			Path:   entry.Path,
 		})
 		manifest.Save()
 		terminal.Successf("Installed plugin skill %q to %s", entry.Name, strings.Join(targets, ", "))
@@ -196,7 +197,7 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 
 	fmt.Println()
 	for _, ss := range sourceMap {
-		dir, cleanup, err := skill.PrepareRepoDir(ss.source)
+		dir, version, cleanup, err := skill.PrepareRepoDir(ss.source)
 		if err != nil {
 			terminal.Errorf("Failed to prepare %q: %v", ss.source, err)
 			continue
@@ -210,7 +211,7 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 		manifest.Save()
 
 		for _, entry := range ss.entries {
-			if err := installSkillEntry(manifest, &entry, ss.source, dir); err != nil {
+			if err := installSkillEntry(manifest, &entry, ss.source, dir, version, verbInstall); err != nil {
 				terminal.Errorf("Failed to install %q: %v", entry.Name, err)
 			}
 		}

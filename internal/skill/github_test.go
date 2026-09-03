@@ -2,6 +2,7 @@ package skill
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func TestRepoToCloneURL(t *testing.T) {
 		{"https://github.com/owner/repo.git", "https://github.com/owner/repo.git"},
 		{"https://gitlab.com/group/repo.git", "https://gitlab.com/group/repo.git"},
 		{"git@github.com:owner/repo.git", "git@github.com:owner/repo.git"},
+		{"file:///tmp/local-repo", "file:///tmp/local-repo"},
 		{"/tmp/local-repo", "/tmp/local-repo"},
 		{"./relative-repo", "./relative-repo"},
 		{"../parent-repo", "../parent-repo"},
@@ -229,7 +231,7 @@ func TestSourceRepoDir(t *testing.T) {
 func TestPrepareRepoDirUsesLocalRepo(t *testing.T) {
 	dir := t.TempDir()
 
-	got, cleanup, err := PrepareRepoDir(dir)
+	got, version, cleanup, err := PrepareRepoDir(dir)
 	if err != nil {
 		t.Fatalf("PrepareRepoDir() error = %v", err)
 	}
@@ -238,6 +240,9 @@ func TestPrepareRepoDirUsesLocalRepo(t *testing.T) {
 	want, _ := filepath.Abs(dir)
 	if got != want {
 		t.Fatalf("PrepareRepoDir() = %q, want %q", got, want)
+	}
+	if version != "" {
+		t.Fatalf("PrepareRepoDir() version = %q, want empty for a local path", version)
 	}
 }
 
@@ -265,4 +270,150 @@ func TestRemoveSourceDir(t *testing.T) {
 	// Cleanup parent dirs.
 	home, _ := os.UserHomeDir()
 	os.RemoveAll(filepath.Join(home, ".clime", "sources", "test-owner"))
+}
+
+func TestRepoVersion(t *testing.T) {
+	repoDir := createTestGitRepo(t, "skills/test-skill", map[string]string{
+		"SKILL.md": "---\nname: test-skill\n---\n# Test",
+	})
+
+	gitOut := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	head := gitOut("rev-parse", "HEAD")
+	if got := RepoVersion(repoDir); got != head {
+		t.Fatalf("RepoVersion() = %q, want HEAD SHA %q", got, head)
+	}
+
+	gitOut("tag", "v1.2.3")
+	if got := RepoVersion(repoDir); got != "v1.2.3" {
+		t.Fatalf("RepoVersion() = %q, want tag %q", got, "v1.2.3")
+	}
+}
+
+func TestRepoVersionNonGitDir(t *testing.T) {
+	t.Parallel()
+
+	if got := RepoVersion(t.TempDir()); got != "" {
+		t.Fatalf("RepoVersion() = %q, want empty string for non-git directory", got)
+	}
+}
+
+func TestParseSourceVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		source      string
+		wantRepo    string
+		wantVersion string
+	}{
+		{"owner/repo", "owner/repo", ""},
+		{"owner/repo@v1.2.3", "owner/repo", "v1.2.3"},
+		{"owner/repo@8f9f4e0b67b9f6c627e93ab4e56ee48d623aa095", "owner/repo", "8f9f4e0b67b9f6c627e93ab4e56ee48d623aa095"},
+		{"owner/repo@", "owner/repo@", ""},
+		{"https://github.com/owner/repo.git@v1.2.3", "https://github.com/owner/repo.git", "v1.2.3"},
+		{"git@github.com:owner/repo.git", "git@github.com:owner/repo.git", ""},
+		{"git@github.com:owner/repo.git@v1.4.2", "git@github.com:owner/repo.git", "v1.4.2"},
+	}
+
+	for _, tt := range tests {
+		repo, version := ParseSourceVersion(tt.source)
+		if repo != tt.wantRepo || version != tt.wantVersion {
+			t.Errorf("ParseSourceVersion(%q) = (%q, %q), want (%q, %q)",
+				tt.source, repo, version, tt.wantRepo, tt.wantVersion)
+		}
+	}
+}
+
+func TestParseSourceVersionKeepsLocalDirWithAt(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	dir := filepath.Join(base, "skills@v2")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, version := ParseSourceVersion(dir)
+	if repo != dir || version != "" {
+		t.Fatalf("ParseSourceVersion(%q) = (%q, %q), want the existing path unchanged", dir, repo, version)
+	}
+}
+
+func TestPrepareRepoDirRejectsVersionForLocalPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, _, _, err := PrepareRepoDir(dir + "@v1.0.0"); err == nil {
+		t.Fatal("PrepareRepoDir() should reject a version suffix on a local path")
+	}
+}
+
+func TestCloneRepoAtVersion(t *testing.T) {
+	remote := createTestGitRepo(t, "skills/test-skill", map[string]string{
+		"SKILL.md": "---\nname: test-skill\n---\n# v1",
+	})
+
+	gitOut := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = remote
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	gitOut("tag", "v1.0.0")
+	taggedSHA := gitOut("rev-parse", "HEAD")
+
+	// A later commit so the tag no longer points at the default branch HEAD.
+	if err := os.WriteFile(filepath.Join(remote, "later.txt"), []byte("later"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOut("add", "-A")
+	gitOut("commit", "-m", "second")
+	gitOut("config", "uploadpack.allowAnySHA1InWant", "true")
+
+	t.Run("tag", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "clone")
+		if err := cloneRepoAtVersion(remote, "v1.0.0", dir); err != nil {
+			t.Fatalf("cloneRepoAtVersion() error = %v", err)
+		}
+		if got := RepoVersion(dir); got != "v1.0.0" {
+			t.Fatalf("RepoVersion() = %q, want %q", got, "v1.0.0")
+		}
+		if _, err := os.Stat(filepath.Join(dir, "later.txt")); err == nil {
+			t.Fatal("file from a later commit should not exist in the tagged checkout")
+		}
+	})
+
+	t.Run("commit SHA", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "clone")
+		if err := cloneRepoAtVersion(remote, taggedSHA, dir); err != nil {
+			t.Fatalf("cloneRepoAtVersion() error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "later.txt")); err == nil {
+			t.Fatal("file from a later commit should not exist in the pinned checkout")
+		}
+	})
+
+	t.Run("unknown version", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "clone")
+		if err := cloneRepoAtVersion(remote, "v9.9.9", dir); err == nil {
+			t.Fatal("cloneRepoAtVersion() should fail for an unknown version")
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatal("failed clone should not leave a cache directory behind")
+		}
+	})
 }

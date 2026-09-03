@@ -56,6 +56,25 @@ func LocalRepoDir(repo string) (string, bool, error) {
 	return "", false, nil
 }
 
+// ParseSourceVersion splits a Go-style versioned source such as
+// "owner/repo@v1.2.3" into the repository and the version. The version
+// separator is the last "@" appearing after the last "/", so the user in an
+// SSH URL like "git@github.com:owner/repo.git" is never treated as a version.
+// A source naming an existing local path is returned unchanged.
+func ParseSourceVersion(source string) (repo, version string) {
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
+		return source, ""
+	}
+	at := strings.LastIndex(source, "@")
+	if at <= strings.LastIndex(source, "/") {
+		return source, ""
+	}
+	if v := source[at+1:]; v != "" {
+		return source[:at], v
+	}
+	return source, ""
+}
+
 // sourceRepoDir returns the persistent local directory for a cached source repository.
 // The directory is under ~/.clime/sources/<sanitized-repo>/.
 func sourceRepoDir(repo string) (string, error) {
@@ -72,6 +91,17 @@ func sourceRepoDir(repo string) (string, error) {
 	return filepath.Join(home, ".clime", "sources", name), nil
 }
 
+// versionCacheDir returns the immutable cache directory for one version of
+// a source repository, beside the repo's mutable tracking checkout.
+func versionCacheDir(srcDir, version string) string {
+	return srcDir + "@" + strings.ReplaceAll(version, "/", "-")
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // RemoveSourceDir removes the persistent local cache for a source repository.
 func RemoveSourceDir(repo string) error {
 	dir, err := sourceRepoDir(repo)
@@ -82,9 +112,10 @@ func RemoveSourceDir(repo string) error {
 }
 
 // repoToCloneURL converts an "owner/repo" shorthand to a git clone URL.
-// Full URLs (https://, git@) and local paths (absolute or relative) are returned as-is.
+// Full URLs (any scheme, or SSH git@) and local paths (absolute or relative)
+// are returned as-is.
 func repoToCloneURL(repo string) string {
-	if strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "git@") {
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "git@") {
 		return repo
 	}
 	if strings.HasPrefix(repo, "/") || strings.HasPrefix(repo, "./") || strings.HasPrefix(repo, "../") {
@@ -129,63 +160,113 @@ func cloneRepoTo(repo, dir string) error {
 	return cloneViaGit(repo, dir)
 }
 
-// pullRepo updates an existing git repository by pulling the latest changes.
-func pullRepo(dir string) error {
-	cmd := exec.Command("git", "pull")
-	cmd.Dir = dir
+// cloneRepoAtVersion clones a repo checked out at the given version (a tag,
+// branch, or commit SHA) into the specified directory. Tags and branches are
+// cloned directly; a commit SHA falls back to cloning the default branch and
+// fetching the commit.
+func cloneRepoAtVersion(repo, version, dir string) error {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
+	}
+
+	url := repoToCloneURL(repo)
+	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", version, url, dir)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git pull failed: %w\n%s", err, out)
+	if _, err := cmd.CombinedOutput(); err == nil {
+		return nil
+	}
+	os.RemoveAll(dir)
+
+	if err := cloneRepoTo(repo, dir); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"fetch", "--depth", "1", "origin", version},
+		{"checkout", "--detach", "FETCH_HEAD"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			os.RemoveAll(dir)
+			return fmt.Errorf("failed to check out version %q: %w\n%s", version, err, out)
+		}
 	}
 	return nil
 }
 
-// PrepareRepoDir returns a directory that can be read for skill files.
-// Existing local repos are reused directly; remote repos are cached in
-// ~/.clime/sources/ and updated with git pull on subsequent calls.
+// PrepareRepoDir returns a directory that can be read for skill files
+// together with the concrete version (tag or full commit SHA) it holds.
+// The source may carry a Go-style version suffix ("owner/repo@v1.2.3");
+// a source without one resolves to "latest", like `go get` without a
+// version. Existing local repos are reused directly and have no version
+// identity, so their version is empty; remote repos are cached per
+// resolved version in ~/.clime/sources/ and never mutated once cloned.
 // The returned cleanup function must always be called by the caller.
-func PrepareRepoDir(repo string) (string, func(), error) {
+func PrepareRepoDir(source string) (dir, version string, cleanup func(), err error) {
+	repo, query := ParseSourceVersion(source)
+
 	if dir, ok, err := LocalRepoDir(repo); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	} else if ok {
-		return dir, func() {}, nil
-	}
-
-	srcDir, err := sourceRepoDir(repo)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if info, err := os.Stat(srcDir); err == nil && info.IsDir() {
-		// Source exists locally, update it with the latest changes.
-		if err := pullRepo(srcDir); err != nil {
-			return "", nil, fmt.Errorf("failed to update %s: %w", repo, err)
+		if query != "" {
+			return "", "", nil, fmt.Errorf("version %q is not supported for local path %q", query, repo)
 		}
-		return srcDir, func() {}, nil
+		return dir, "", func() {}, nil
 	}
 
-	// Clone to persistent source directory.
-	if err := cloneRepoTo(repo, srcDir); err != nil {
-		return "", nil, fmt.Errorf("failed to clone %s: %w", repo, err)
-	}
-	return srcDir, func() {}, nil
+	return prepareRemoteRepoDir(repo, query)
 }
 
-// FetchRepoManifest fetches skills from a repo's manifest.
-// The repo is always cloned (or updated) into ~/.clime/sources/ so
-// the source is cached locally for subsequent operations.
-// Existing local paths are read directly without cloning.
+// prepareRemoteRepoDir resolves the version query and materializes an
+// immutable snapshot of the repository at that version.
+func prepareRemoteRepoDir(repo, query string) (dir, version string, cleanup func(), err error) {
+	srcDir, err := sourceRepoDir(repo)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if query == "" {
+		query = "latest"
+	}
+
+	// A concrete version already in cache needs no network round-trip.
+	// Floating queries (latest, a semver line, a branch) never match a
+	// cache entry because only resolved versions are stored.
+	if dir := versionCacheDir(srcDir, query); dirExists(dir) {
+		return dir, query, func() {}, nil
+	}
+	resolved, err := ResolveVersion(repo, query)
+	if err != nil {
+		return "", "", nil, err
+	}
+	dir = versionCacheDir(srcDir, resolved)
+	if dirExists(dir) {
+		return dir, resolved, func() {}, nil
+	}
+	if err := cloneRepoAtVersion(repo, resolved, dir); err != nil {
+		return "", "", nil, fmt.Errorf("failed to clone %s at %s: %w", repo, resolved, err)
+	}
+	return dir, resolved, func() {}, nil
+}
+
+// FetchRepoManifest fetches skills from a repo's manifest at the source's
+// resolved version (latest when no version is given), cached under
+// ~/.clime/sources/. Existing local paths are read directly without cloning.
 func FetchRepoManifest(repo string) (*RepoManifest, error) {
-	dir, cleanup, err := PrepareRepoDir(repo)
+	dir, _, cleanup, err := PrepareRepoDir(repo)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
 
-	return readRepoManifestFromDir(dir, repo)
+	return ReadRepoManifestFromDir(dir, repo)
 }
 
-func readRepoManifestFromDir(dir, repo string) (*RepoManifest, error) {
+// ReadRepoManifestFromDir reads the skill catalog of a repository checkout,
+// trying skills.yaml, skills.yml, .claude-plugin/marketplace.json and
+// .claude-plugin/plugin.json in that order. repo names the repository in
+// errors.
+func ReadRepoManifestFromDir(dir, repo string) (*RepoManifest, error) {
 	// Try skills.yaml / skills.yml first.
 	var data []byte
 	var err error
@@ -351,9 +432,31 @@ func readSkillFrontmatter(path string) (*skillFrontmatter, error) {
 	return parseSkillFrontmatter(data)
 }
 
+// RepoVersion resolves the version of a checked-out repository directory.
+// It prefers a tag pointing exactly at HEAD and falls back to the full
+// commit SHA. Returns an empty string when dir is not a git repository.
+func RepoVersion(dir string) string {
+	for _, args := range [][]string{
+		{"describe", "--tags", "--exact-match", "HEAD"},
+		{"rev-parse", "HEAD"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		if v := strings.TrimSpace(string(out)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // CloneRepo clones (or updates) a repo into ~/.clime/sources/ and returns the path.
 func CloneRepo(repo string) (string, error) {
-	dir, _, err := PrepareRepoDir(repo)
+	dir, _, _, err := PrepareRepoDir(repo)
 	return dir, err
 }
 
@@ -408,7 +511,7 @@ func ReadSkillFilesFromDir(dir, skillPath string) (map[string][]byte, error) {
 // CloneAndReadSkillFiles clones the repo and reads all files under skillPath.
 // Returns a map of relative file paths to their contents.
 func CloneAndReadSkillFiles(repo, skillPath string) (map[string][]byte, error) {
-	dir, cleanup, err := PrepareRepoDir(repo)
+	dir, _, cleanup, err := PrepareRepoDir(repo)
 	if err != nil {
 		return nil, err
 	}

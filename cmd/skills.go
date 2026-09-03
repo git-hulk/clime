@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	uicli "github.com/alperdrsnn/clime"
 	"github.com/git-hulk/clime/internal/prompt"
@@ -18,6 +17,8 @@ func init() {
 		"when installing from a repo, also (re)install skills that are already installed and overwrite them")
 	skillsCmd.AddCommand(skillsListCmd)
 	skillsCmd.AddCommand(skillsInstallCmd)
+	skillsCmd.AddCommand(skillsUpdateCmd)
+	skillsCmd.AddCommand(skillsSyncCmd)
 	skillsCmd.AddCommand(skillsUninstallCmd)
 	rootCmd.AddCommand(skillsCmd)
 }
@@ -51,16 +52,11 @@ var skillsListCmd = &cobra.Command{
 			uicli.DimColor.Sprintf("(%d total)", len(manifest.Skills)),
 		)
 
-		headers := []string{"NAME", "DESCRIPTION", "SOURCE"}
-		const descWidth = 50
+		headers := []string{"NAME", "SOURCE", "VERSION"}
 		var rows [][]string
 		for _, s := range manifest.Skills {
-			desc := s.Description
-			if desc == "" {
-				desc = "—"
-			}
-			desc = uicli.TruncateString(desc, descWidth)
-			rows = append(rows, []string{s.Name, desc, s.Source})
+			source, _ := manifest.GetSource(s.Source)
+			rows = append(rows, []string{s.Name, s.Source, displaySkillVersion(source.Version)})
 		}
 
 		colWidths := make([]int, len(headers))
@@ -111,6 +107,27 @@ var skillsListCmd = &cobra.Command{
 	},
 }
 
+// displaySkillVersion shortens a full commit SHA for table display; tags are
+// shown as-is and an unknown version renders as a dash.
+func displaySkillVersion(version string) string {
+	if version == "" {
+		return "—"
+	}
+	if len(version) == 40 && isHexString(version) {
+		return version[:12]
+	}
+	return version
+}
+
+func isHexString(s string) bool {
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 type sourceAction int
 
 const (
@@ -131,9 +148,14 @@ var (
 )
 
 var skillsInstallCmd = &cobra.Command{
-	Use:   "install [owner/repo|path]",
+	Use:   "install [owner/repo[@version]|path]",
 	Short: "Install skills from a GitHub repository or local path",
-	Args:  cobra.MaximumNArgs(1),
+	Long: "Install skills from a GitHub repository or local path. A repository source " +
+		"may carry a Go-style version suffix resolved like `go get`: owner/repo@latest " +
+		"(the default when no version is given) picks the highest stable semver tag, " +
+		"owner/repo@v1 the highest v1.x.y tag, and an exact tag, branch, or commit SHA " +
+		"pins that revision.",
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := skill.LoadManifest()
 		if err != nil {
@@ -224,24 +246,52 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 	}
 }
 
+// uniqueSkillSources lists the sources of installed skills followed by
+// tracked sources, preserving order and first-seen spelling; repository
+// names are case-insensitive.
 func uniqueSkillSources(manifest *skill.Manifest) []string {
-	// Collect unique sources from installed skills and tracked sources, preserving order.
-	seen := make(map[string]bool)
-	var sources []string
+	sources := make([]string, 0, len(manifest.Skills)+len(manifest.Sources))
 	for _, s := range manifest.Skills {
-		if s.Source != "" && !seen[s.Source] {
-			seen[s.Source] = true
-			sources = append(sources, s.Source)
-		}
+		sources = append(sources, s.Source)
 	}
 	for _, s := range manifest.Sources {
-		if s != "" && !seen[s] {
-			seen[s] = true
-			sources = append(sources, s)
+		sources = append(sources, s.Repo)
+	}
+	return dedupeSources(sources)
+}
+
+// installedSkillSources lists the sources that have at least one installed
+// skill, in first-seen order and spelling.
+func installedSkillSources(manifest *skill.Manifest) []string {
+	sources := make([]string, 0, len(manifest.Skills))
+	for _, s := range manifest.Skills {
+		sources = append(sources, s.Source)
+	}
+	return dedupeSources(sources)
+}
+
+func dedupeSources(sources []string) []string {
+	seen := make(map[string]bool)
+	var unique []string
+	for _, source := range sources {
+		key := strings.ToLower(source)
+		if source != "" && !seen[key] {
+			seen[key] = true
+			unique = append(unique, source)
 		}
 	}
+	return unique
+}
 
-	return sources
+// skillsFromSource returns the installed skills recorded from a source repository.
+func skillsFromSource(manifest *skill.Manifest, repo string) []skill.InstalledSkill {
+	var installed []skill.InstalledSkill
+	for _, s := range manifest.Skills {
+		if skill.SameSource(s.Source, repo) {
+			installed = append(installed, s)
+		}
+	}
+	return installed
 }
 
 func runSkillsSourceAction(manifest *skill.Manifest, repo string, action sourceAction) error {
@@ -253,7 +303,8 @@ func runSkillsSourceAction(manifest *skill.Manifest, repo string, action sourceA
 	case actionRemoveSource:
 		return removeSource(manifest, repo)
 	case actionUpdate:
-		return updateSource(manifest, repo)
+		_, err := updateSource(manifest, repo)
+		return err
 	default:
 		return installFromRepo(manifest, repo, false)
 	}
@@ -305,10 +356,8 @@ func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 // removeSource uninstalls all skills from the given source and removes it from the manifest.
 func removeSource(manifest *skill.Manifest, repo string) error {
 	var names []string
-	for _, s := range manifest.Skills {
-		if s.Source == repo {
-			names = append(names, s.Name)
-		}
+	for _, s := range skillsFromSource(manifest, repo) {
+		names = append(names, s.Name)
 	}
 
 	fmt.Println()
@@ -329,61 +378,238 @@ func removeSource(manifest *skill.Manifest, repo string) error {
 	return nil
 }
 
-// updateSource re-installs all skills from the given source with the latest files.
-func updateSource(manifest *skill.Manifest, repo string) error {
-	var installed []skill.InstalledSkill
-	for _, s := range manifest.Skills {
-		if s.Source == repo {
-			installed = append(installed, s)
+var skillsUpdateCmd = &cobra.Command{
+	Use:   "update [owner/repo[@version]]",
+	Short: "Update installed skills to the latest version",
+	Long: "Update the skills installed from a source repository. With no argument every " +
+		"source is updated to its latest version. With a repository, only that source is " +
+		"updated: to latest, or to the version given by a Go-style suffix such as " +
+		"owner/repo@v1.2.3 or owner/repo@v1. The set of installed skills is preserved.",
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manifest, err := skill.LoadManifest()
+		if err != nil {
+			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
-	}
 
-	if len(installed) == 0 {
-		terminal.Warningf("No skills installed from %s.", repo)
+		if len(args) > 0 {
+			return runSkillsSourceAction(manifest, args[0], actionUpdate)
+		}
+		return forEachInstalledSource(manifest, verbUpdate, updateSource)
+	},
+}
+
+var skillsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Reinstall skills at the versions locked in the manifest",
+	Long: "Reinstall every skill recorded in ~/.clime/skills.yaml from its source at the " +
+		"locked version, without looking for a newer one. Versions already cached under " +
+		"~/.clime/sources are applied without network access. Use `clime skills update` " +
+		"to move a source to a newer version.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manifest, err := skill.LoadManifest()
+		if err != nil {
+			return fmt.Errorf("failed to load skills manifest: %w", err)
+		}
+		return forEachInstalledSource(manifest, verbSync, syncSource)
+	},
+}
+
+// skillVerb names an operation on skills in the forms progress output needs.
+type skillVerb struct {
+	base    string // "sync"
+	present string // "Syncing"
+	past    string // "Synced"
+	prep    string // joins the source to its version: "Syncing repo at v1"
+}
+
+var (
+	verbInstall = skillVerb{"install", "Installing", "Installed", "at"}
+	verbUpdate  = skillVerb{"update", "Updating", "Updated", "to"}
+	verbSync    = skillVerb{"sync", "Syncing", "Synced", "at"}
+)
+
+// forEachInstalledSource applies fn to every source with installed skills,
+// continuing past failures so one unreachable source does not block the
+// rest. fn returns how many skills it changed; the run ends with a summary.
+func forEachInstalledSource(manifest *skill.Manifest, verb skillVerb, fn func(*skill.Manifest, string) (int, error)) error {
+	repos := installedSkillSources(manifest)
+	if len(repos) == 0 {
+		terminal.Warning("No skills installed.")
 		return nil
 	}
 
-	// Resolve the repo once and reuse it for all skill updates.
-	dir, cleanup, err := skill.PrepareRepoDir(repo)
-	if err != nil {
-		return err
+	failed, changed := 0, 0
+	for _, repo := range repos {
+		fmt.Println()
+		n, err := fn(manifest, repo)
+		changed += n
+		if err != nil {
+			terminal.Errorf("Failed to %s %s: %v", verb.base, repo, err)
+			failed++
+		}
 	}
-	defer cleanup()
 
 	fmt.Println()
-	var removed []string
-	for _, s := range installed {
-		entry := &skill.SkillEntry{
-			Name:        s.Name,
-			Description: s.Description,
-			Path:        s.Path,
-		}
-		if err := installSkillEntry(manifest, entry, repo, dir); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				removed = append(removed, s.Name)
-				continue
-			}
-			terminal.Errorf("Failed to update %q: %v", s.Name, err)
-		}
+	if failed > 0 {
+		return fmt.Errorf("failed to %s %d of %d source(s)", verb.base, failed, len(repos))
 	}
-	if len(removed) > 0 {
-		for _, name := range removed {
-			skill.Uninstall(name)
-			manifest.RemoveSkill(name)
-		}
-		if err := manifest.Save(); err != nil {
-			return fmt.Errorf("failed to update manifest after removing skills: %w", err)
-		}
-		terminal.Warningf("The following skills were removed from upstream: %s", strings.Join(removed, ", "))
+	if changed == 0 {
+		terminal.Success("All skills are up to date.")
+		return nil
 	}
+	terminal.Successf("%s %d skill(s) from %d source(s).", verb.past, changed, len(repos))
 	return nil
 }
 
-func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo string, localDir string) error {
+// lockedSource pins a repository to the version recorded in the manifest.
+// Local paths carry no version identity and are returned unchanged.
+func lockedSource(manifest *skill.Manifest, repo string) string {
+	src, ok := manifest.GetSource(repo)
+	if !ok || src.Version == "" {
+		return repo
+	}
+	if _, isLocal, _ := skill.LocalRepoDir(repo); isLocal {
+		return repo
+	}
+	return repo + "@" + src.Version
+}
+
+// syncSource re-installs every skill from a source at the version locked in
+// the manifest, using the stored skill paths, and returns how many skills it
+// re-installed. A source without a locked version is installed at latest and
+// the resolved version is recorded.
+func syncSource(manifest *skill.Manifest, repo string) (int, error) {
+	installed := skillsFromSource(manifest, repo)
+	if len(installed) == 0 {
+		return 0, fmt.Errorf("no skills installed from %s", repo)
+	}
+
+	source := lockedSource(manifest, repo)
 	spinner := uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
-		WithMessage(fmt.Sprintf("Installing skill %q from %s...", entry.Name, repo)).
+		WithMessage(fmt.Sprintf("Preparing %s...", source)).
+		Start()
+
+	dir, version, cleanup, err := skill.PrepareRepoDir(source)
+	if err != nil {
+		spinner.Error(fmt.Sprintf("Failed to prepare %s", source))
+		return 0, err
+	}
+	defer cleanup()
+	spinner.Success(sourceVersionLabel(verbSync, repo, version))
+
+	return installSkillEntries(manifest, installedEntries(installed), repo, dir, version, verbSync)
+}
+
+// sourceVersionLabel renders "Syncing owner/repo at v1.2.3" or "Updating
+// owner/repo to v1.2.3", omitting the version for sources without one.
+func sourceVersionLabel(verb skillVerb, repo, version string) string {
+	if version == "" {
+		return fmt.Sprintf("%s %s", verb.present, repo)
+	}
+	return fmt.Sprintf("%s %s %s %s", verb.present, repo, verb.prep, displaySkillVersion(version))
+}
+
+func installedEntries(installed []skill.InstalledSkill) []skill.SkillEntry {
+	entries := make([]skill.SkillEntry, 0, len(installed))
+	for _, s := range installed {
+		entries = append(entries, skill.SkillEntry{Name: s.Name, Path: s.Path})
+	}
+	return entries
+}
+
+// installSkillEntries installs each entry in turn, reporting failures as
+// they happen, and returns how many succeeded.
+func installSkillEntries(manifest *skill.Manifest, entries []skill.SkillEntry, repo, dir, version string, verb skillVerb) (int, error) {
+	failed := 0
+	for i := range entries {
+		if err := installSkillEntry(manifest, &entries[i], repo, dir, version, verb); err != nil {
+			terminal.Errorf("Failed to %s %q: %v", verb.base, entries[i].Name, err)
+			failed++
+		}
+	}
+	if failed > 0 {
+		return len(entries) - failed, fmt.Errorf("%d skill(s) failed", failed)
+	}
+	return len(entries), nil
+}
+
+// updateSource re-installs every skill from a source at the version its
+// query resolves to (latest when the source carries none), taking each
+// skill's path from the catalog at that version, and returns
+// how many skills it re-installed. The update is refused when the new
+// catalog no longer lists an installed skill, so a skill is never removed
+// implicitly.
+func updateSource(manifest *skill.Manifest, source string) (int, error) {
+	repo, _ := skill.ParseSourceVersion(source)
+	installed := skillsFromSource(manifest, repo)
+	if len(installed) == 0 {
+		return 0, fmt.Errorf("no skills installed from %s", repo)
+	}
+
+	spinner := uicli.NewSpinner().
+		WithStyle(uicli.SpinnerDots).
+		WithColor(uicli.CyanColor).
+		WithMessage(fmt.Sprintf("Resolving %s...", source)).
+		Start()
+
+	dir, version, cleanup, err := skill.PrepareRepoDir(source)
+	if err != nil {
+		spinner.Error(fmt.Sprintf("Failed to resolve %s", source))
+		return 0, err
+	}
+	defer cleanup()
+
+	if current, _ := manifest.GetSource(repo); version != "" && version == current.Version {
+		spinner.Success(fmt.Sprintf("%s is already at %s", repo, displaySkillVersion(version)))
+		return 0, nil
+	}
+
+	catalog, err := skill.ReadRepoManifestFromDir(dir, repo)
+	if err != nil {
+		spinner.Error(fmt.Sprintf("Failed to read skills from %s", repo))
+		return 0, err
+	}
+	entries := make([]skill.SkillEntry, 0, len(installed))
+	var missing []string
+	for _, s := range installed {
+		entry, ok := findSkillEntry(catalog, s.Name)
+		if !ok {
+			missing = append(missing, s.Name)
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	if len(missing) > 0 {
+		spinner.Error(fmt.Sprintf("Cannot update %s", repo))
+		return 0, fmt.Errorf("%s at %s no longer provides %s; uninstall them first to update",
+			repo, displaySkillVersion(version), strings.Join(missing, ", "))
+	}
+	spinner.Success(sourceVersionLabel(verbUpdate, repo, version))
+
+	return installSkillEntries(manifest, entries, repo, dir, version, verbUpdate)
+}
+
+func findSkillEntry(catalog *skill.RepoManifest, name string) (skill.SkillEntry, bool) {
+	for _, entry := range catalog.Skills {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return skill.SkillEntry{}, false
+}
+
+// installSkillEntry writes one skill from localDir into the agent targets
+// and records it in the manifest under repo at version, which may be empty
+// for sources without version identity. verb names the operation in output.
+func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo, localDir, version string, verb skillVerb) error {
+	spinner := uicli.NewSpinner().
+		WithStyle(uicli.SpinnerDots).
+		WithColor(uicli.CyanColor).
+		WithMessage(fmt.Sprintf("%s skill %q from %s...", verb.present, entry.Name, repo)).
 		Start()
 
 	var targets []string
@@ -397,9 +623,9 @@ func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo s
 		if errors.Is(err, os.ErrNotExist) {
 			spinner.Stop()
 		} else {
-			spinner.Error(fmt.Sprintf("Failed to install skill %q", entry.Name))
+			spinner.Error(fmt.Sprintf("Failed to %s skill %q", verb.base, entry.Name))
 		}
-		return fmt.Errorf("failed to install skill %q: %w", entry.Name, err)
+		return fmt.Errorf("failed to %s skill %q: %w", verb.base, entry.Name, err)
 	}
 
 	if len(targets) == 0 {
@@ -408,18 +634,23 @@ func installSkillEntry(manifest *skill.Manifest, entry *skill.SkillEntry, repo s
 		return nil
 	}
 
+	// The manifest identifies the source by repository alone; the resolved
+	// version is recorded on the source so a floating query like @latest is
+	// never persisted as part of its identity.
+	sourceRepo, _ := skill.ParseSourceVersion(repo)
+	if version != "" {
+		manifest.SetSourceVersion(sourceRepo, version)
+	}
 	manifest.AddSkill(skill.InstalledSkill{
-		Name:        entry.Name,
-		Description: entry.Description,
-		Source:      repo,
-		Path:        entry.Path,
-		InstalledAt: time.Now(),
+		Name:   entry.Name,
+		Source: sourceRepo,
+		Path:   entry.Path,
 	})
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("skill installed but failed to update manifest: %w", err)
 	}
 
-	spinner.Success(fmt.Sprintf("Installed skill %q to %s", entry.Name, strings.Join(targets, ", ")))
+	spinner.Success(fmt.Sprintf("%s skill %q to %s", verb.past, entry.Name, strings.Join(targets, ", ")))
 	return nil
 }
 
@@ -506,7 +737,7 @@ func installFromRepo(manifest *skill.Manifest, repo string, force bool) error {
 	}
 
 	// Resolve the repo once and reuse it for all skill installations.
-	dir, cleanup, err := skill.PrepareRepoDir(repo)
+	dir, version, cleanup, err := skill.PrepareRepoDir(repo)
 	if err != nil {
 		return err
 	}
@@ -516,7 +747,7 @@ func installFromRepo(manifest *skill.Manifest, repo string, force bool) error {
 	fmt.Println()
 	for _, idx := range selectedIdxs {
 		entry := candidates[idx].entry
-		if err := installSkillEntry(manifest, &entry, repo, dir); err != nil {
+		if err := installSkillEntry(manifest, &entry, repo, dir, version, verbInstall); err != nil {
 			terminal.Errorf("Failed to install %q: %v", entry.Name, err)
 		}
 	}
@@ -576,11 +807,7 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 
 	options := make([]string, len(manifest.Skills))
 	for i, s := range manifest.Skills {
-		label := s.Name
-		if s.Description != "" {
-			label = fmt.Sprintf("%s — %s", s.Name, uicli.TruncateString(s.Description, 60))
-		}
-		options[i] = label
+		options[i] = s.Name
 	}
 
 	showSpacer := true
