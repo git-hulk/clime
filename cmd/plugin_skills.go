@@ -17,6 +17,22 @@ const pluginSkillsOption = "Plugin Skills"
 // auto-install any skills the plugin provides. It's a variable for testing.
 var pluginSkillInstaller = tryInstallPluginSkills
 
+// pluginSkillEvents reports only successful installs; every failure stays
+// silent so plugin installation is never blocked.
+type pluginSkillEvents struct {
+	skill.NopEvents
+}
+
+// pluginSkillSource pairs a plugin name with its skill source path/repo.
+type pluginSkillSource struct {
+	pluginName string
+	source     string
+}
+
+func (pluginSkillEvents) SkillInstalled(_ skill.Verb, name string, targets []string) {
+	terminal.Successf("Installed plugin skill %q to %s", name, strings.Join(targets, ", "))
+}
+
 // tryInstallPluginSkills invokes `clime-<name> skills` to discover a skill
 // source from the plugin. If the plugin provides skills, they are automatically
 // installed. Errors are silently ignored so plugin installation is never blocked.
@@ -25,43 +41,28 @@ func tryInstallPluginSkills(name string) {
 	if source == "" {
 		return
 	}
-
-	manifest, err := skill.LoadManifest()
+	src, err := skill.ParseSource(source)
 	if err != nil {
 		return
 	}
 
-	repoManifest, err := skill.FetchRepoManifest(source)
+	mgr, err := skill.Open(pluginSkillEvents{})
 	if err != nil {
 		return
 	}
 
-	dir, version, cleanup, err := skill.PrepareRepoDir(source)
+	snap, catalog, err := mgr.Fetch(src)
 	if err != nil {
 		return
 	}
-	defer cleanup()
 
-	sourceRepo, _ := skill.ParseSourceVersion(source)
-	for _, entry := range repoManifest.Skills {
-		if _, installed := manifest.GetSkill(entry.Name); installed {
-			continue
+	var entries []skill.Entry
+	for _, entry := range catalog.Skills {
+		if _, installed := mgr.Manifest.GetSkill(entry.Name); !installed {
+			entries = append(entries, entry)
 		}
-		targets, err := skill.InstallFromDir(entry.Name, dir, entry.Path)
-		if err != nil || len(targets) == 0 {
-			continue
-		}
-		if version != "" {
-			manifest.SetSourceVersion(sourceRepo, version)
-		}
-		manifest.AddSkill(skill.InstalledSkill{
-			Name:   entry.Name,
-			Source: sourceRepo,
-			Path:   entry.Path,
-		})
-		manifest.Save()
-		terminal.Successf("Installed plugin skill %q to %s", entry.Name, strings.Join(targets, ", "))
 	}
+	_, _ = mgr.Install(snap, entries)
 }
 
 // getPluginSkillSource runs `clime-<name> skills` and returns the trimmed
@@ -77,12 +78,6 @@ func getPluginSkillSource(name string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// pluginSkillSource pairs a plugin name with its skill source path/repo.
-type pluginSkillSource struct {
-	pluginName string
-	source     string
 }
 
 // discoverPluginSkillSources iterates all discovered plugins and returns
@@ -106,11 +101,7 @@ func discoverPluginSkillSources() []pluginSkillSource {
 // It scans all plugins for skill sources, presents available skills, and
 // installs the user's selections.
 func installFromPluginSkills(manifest *skill.Manifest) error {
-	spinner := uicli.NewSpinner().
-		WithStyle(uicli.SpinnerDots).
-		WithColor(uicli.CyanColor).
-		WithMessage("Scanning plugins for skills...").
-		Start()
+	spinner := startSpinner("Scanning plugins for skills...")
 
 	sources := discoverPluginSkillSources()
 	if len(sources) == 0 {
@@ -119,24 +110,30 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 		return nil
 	}
 
-	// Collect skills from all plugin sources.
-	type skillCandidate struct {
-		entry  skill.SkillEntry
-		source string
-		label  string
-	}
-	var candidates []skillCandidate
-	var dirs []struct {
-		dir     string
-		cleanup func()
+	mgr, err := newSkillsManager(manifest)
+	if err != nil {
+		spinner.Error("Failed to prepare skill manager")
+		return err
 	}
 
+	// Collect skills from all plugin sources.
+	type skillCandidate struct {
+		entry skill.Entry
+		src   skill.Source
+		label string
+	}
+	var candidates []skillCandidate
+
 	for _, ps := range sources {
-		repoManifest, err := skill.FetchRepoManifest(ps.source)
+		src, err := skill.ParseSource(ps.source)
 		if err != nil {
 			continue
 		}
-		for _, entry := range repoManifest.Skills {
+		_, catalog, err := mgr.Fetch(src)
+		if err != nil {
+			continue
+		}
+		for _, entry := range catalog.Skills {
 			if _, installed := manifest.GetSkill(entry.Name); installed {
 				continue
 			}
@@ -145,9 +142,9 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 				label = fmt.Sprintf("%s — %s (%s)", entry.Name, uicli.TruncateString(entry.Description, 50), ps.pluginName)
 			}
 			candidates = append(candidates, skillCandidate{
-				entry:  entry,
-				source: ps.source,
-				label:  label,
+				entry: entry,
+				src:   src,
+				label: label,
 			})
 		}
 	}
@@ -179,46 +176,35 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 		return nil
 	}
 
-	// Group selected skills by source to prepare repos efficiently.
+	// Group selected skills by source so each repository resolves once.
 	type sourceSkills struct {
-		source  string
-		entries []skill.SkillEntry
+		src     skill.Source
+		entries []skill.Entry
 	}
 	sourceMap := make(map[string]*sourceSkills)
 	for _, idx := range selectedIdxs {
 		c := candidates[idx]
-		ss, ok := sourceMap[c.source]
+		ss, ok := sourceMap[c.src.Repo]
 		if !ok {
-			ss = &sourceSkills{source: c.source}
-			sourceMap[c.source] = ss
+			ss = &sourceSkills{src: c.src}
+			sourceMap[c.src.Repo] = ss
 		}
 		ss.entries = append(ss.entries, c.entry)
 	}
 
 	fmt.Println()
 	for _, ss := range sourceMap {
-		dir, version, cleanup, err := skill.PrepareRepoDir(ss.source)
+		snap, err := mgr.Store.Snapshot(ss.src)
 		if err != nil {
-			terminal.Errorf("Failed to prepare %q: %v", ss.source, err)
+			terminal.Errorf("Failed to prepare %q: %v", ss.src, err)
 			continue
 		}
-		dirs = append(dirs, struct {
-			dir     string
-			cleanup func()
-		}{dir, cleanup})
 
-		manifest.AddSource(ss.source)
+		manifest.AddSource(ss.src)
 		manifest.Save()
 
-		for _, entry := range ss.entries {
-			if err := installSkillEntry(manifest, &entry, ss.source, dir, version, verbInstall); err != nil {
-				terminal.Errorf("Failed to install %q: %v", entry.Name, err)
-			}
-		}
-	}
-
-	for _, d := range dirs {
-		d.cleanup()
+		// Per-skill failures are already reported through the progress events.
+		_, _ = mgr.Install(snap, ss.entries)
 	}
 
 	return nil

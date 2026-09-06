@@ -75,23 +75,88 @@ func TestGetSkill(t *testing.T) {
 	}
 }
 
-func TestAddSourceStripsVersionQuery(t *testing.T) {
+func TestSkillsFrom(t *testing.T) {
+	t.Parallel()
+	m := &Manifest{
+		Skills: []InstalledSkill{
+			{Name: "alpha", Source: "owner/repo"},
+			{Name: "beta", Source: "Owner/Repo"},
+			{Name: "gamma", Source: "other/repo"},
+		},
+	}
+
+	got := m.SkillsFrom(Source{Repo: "OWNER/REPO"})
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "beta" {
+		t.Fatalf("SkillsFrom() = %+v, want alpha and beta across spellings", got)
+	}
+}
+
+func TestSourcesAreCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	m := &Manifest{}
 
-	m.AddSource("owner/repo")
-	m.AddSource("owner/repo@latest")
-	m.AddSource("owner/repo@v1.2.3")
-	m.AddSource("other/repo@v2")
-
-	want := []string{"owner/repo", "other/repo"}
-	if len(m.Sources) != len(want) {
-		t.Fatalf("sources = %v, want %v", m.Sources, want)
+	m.AddSource(Source{Repo: "AfterShip/Skills"})
+	m.AddSource(Source{Repo: "aftership/skills"})
+	if len(m.Sources) != 1 || m.Sources[0].Repo != "AfterShip/Skills" {
+		t.Fatalf("sources = %v, want first-seen spelling only", m.Sources)
 	}
-	for i, s := range want {
-		if m.Sources[i].Repo != s {
-			t.Fatalf("sources = %v, want %v", m.Sources, want)
-		}
+
+	if !m.RemoveSource(Source{Repo: "AFTERSHIP/SKILLS"}) {
+		t.Fatal("RemoveSource should match case-insensitively")
+	}
+	if len(m.Sources) != 0 {
+		t.Fatalf("sources = %v, want empty", m.Sources)
+	}
+}
+
+func TestSetSourceVersion(t *testing.T) {
+	t.Parallel()
+	m := &Manifest{}
+
+	m.SetSourceVersion(Source{Repo: "owner/repo"}, "v1.0.0")
+	m.SetSourceVersion(Source{Repo: "Owner/Repo"}, "v2.0.0")
+
+	if len(m.Sources) != 1 {
+		t.Fatalf("sources = %v, want one entry across spellings", m.Sources)
+	}
+	record, ok := m.GetSource(Source{Repo: "OWNER/REPO"})
+	if !ok || record.Repo != "owner/repo" || record.Version != "v2.0.0" {
+		t.Fatalf("source = %+v, want first-seen spelling with the updated version", record)
+	}
+}
+
+func TestInstalledAndKnownSources(t *testing.T) {
+	t.Parallel()
+	m := &Manifest{
+		Skills: []InstalledSkill{
+			{Name: "alpha", Source: "owner/repo"},
+			{Name: "beta", Source: "Owner/Repo"},
+		},
+		Sources: []SourceRecord{
+			{Repo: "owner/repo", Version: "v1.0.0"},
+			{Repo: "tracked/only"},
+		},
+	}
+
+	installed := m.InstalledSources()
+	if len(installed) != 1 || installed[0].Repo != "owner/repo" {
+		t.Fatalf("InstalledSources() = %v, want the skills' shared source once", installed)
+	}
+
+	known := m.KnownSources()
+	if len(known) != 2 || known[0].Repo != "owner/repo" || known[1].Repo != "tracked/only" {
+		t.Fatalf("KnownSources() = %v, want installed sources then tracked ones", known)
+	}
+}
+
+func writeManifestFile(t *testing.T, home, content string) {
+	t.Helper()
+	dir := filepath.Join(home, ".clime")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -113,12 +178,6 @@ sources:
   - owner/repo@v1.2.3
 `)
 
-	// The source gets its version from the legacy fields, so nothing resolves.
-	stubResolveLatest(t, func(repo string) (string, error) {
-		t.Fatal("resolveLatestVersion should not run when a version was migrated")
-		return "", nil
-	})
-
 	m, err := LoadManifest()
 	if err != nil {
 		t.Fatalf("LoadManifest() error = %v", err)
@@ -139,25 +198,7 @@ sources:
 	}
 }
 
-func writeManifestFile(t *testing.T, home, content string) {
-	t.Helper()
-	dir := filepath.Join(home, ".clime")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "skills.yaml"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func stubResolveLatest(t *testing.T, fn func(repo string) (string, error)) {
-	t.Helper()
-	orig := resolveLatestVersion
-	resolveLatestVersion = fn
-	t.Cleanup(func() { resolveLatestVersion = orig })
-}
-
-func TestLoadManifestStampsMissingVersions(t *testing.T) {
+func TestLoadManifestListsSkillSources(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	writeManifestFile(t, home, `skills:
@@ -169,124 +210,15 @@ func TestLoadManifestStampsMissingVersions(t *testing.T) {
     path: skills/sibling-skill
 `)
 
-	var calls int
-	stubResolveLatest(t, func(repo string) (string, error) {
-		calls++
-		if repo != "owner/repo" {
-			t.Fatalf("resolveLatestVersion(%q), want %q", repo, "owner/repo")
-		}
-		return "v2.0.0", nil
-	})
-
 	m, err := LoadManifest()
 	if err != nil {
 		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("resolveLatestVersion called %d times, want once per source", calls)
 	}
 	if len(m.Sources) != 1 {
 		t.Fatalf("sources = %v, want the skills' shared source listed once", m.Sources)
 	}
-	if src, ok := m.GetSource("owner/repo"); !ok || src.Version != "v2.0.0" {
-		t.Fatalf("source = %+v, want version stamped %q", src, "v2.0.0")
-	}
-
-	// The stamp is persisted: a reload must not resolve again.
-	stubResolveLatest(t, func(repo string) (string, error) {
-		t.Fatal("resolveLatestVersion should not run after versions are persisted")
-		return "", nil
-	})
-	if _, err := LoadManifest(); err != nil {
-		t.Fatalf("LoadManifest() reload error = %v", err)
-	}
-}
-
-func TestLoadManifestLeavesVersionEmptyWhenResolutionFails(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	writeManifestFile(t, home, `skills:
-  - name: old-skill
-    source: owner/repo
-    path: skills/old-skill
-`)
-
-	stubResolveLatest(t, func(repo string) (string, error) {
-		return "", os.ErrDeadlineExceeded
-	})
-
-	m, err := LoadManifest()
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	if src, _ := m.GetSource("owner/repo"); src.Version != "" {
-		t.Fatalf("source version = %q, want empty when resolution fails", src.Version)
-	}
-}
-
-func TestLoadManifestDoesNotResolveLocalPathSources(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	localSource := t.TempDir()
-	writeManifestFile(t, home, `skills:
-  - name: local-skill
-    source: `+localSource+`
-    path: skills/local-skill
-`)
-
-	stubResolveLatest(t, func(repo string) (string, error) {
-		t.Fatal("resolveLatestVersion should not run for local path sources")
-		return "", nil
-	})
-
-	m, err := LoadManifest()
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	if src, _ := m.GetSource(localSource); src.Version != "" {
-		t.Fatalf("source version = %q, want empty for a local path source", src.Version)
-	}
-}
-
-func TestSourcesAreCaseInsensitive(t *testing.T) {
-	t.Parallel()
-	m := &Manifest{}
-
-	m.AddSource("AfterShip/Skills")
-	m.AddSource("aftership/skills")
-	m.AddSource("AfterShip/Skills@v1.2.3")
-	if len(m.Sources) != 1 || m.Sources[0].Repo != "AfterShip/Skills" {
-		t.Fatalf("sources = %v, want first-seen spelling only", m.Sources)
-	}
-
-	if !m.RemoveSource("AFTERSHIP/SKILLS") {
-		t.Fatal("RemoveSource should match case-insensitively")
-	}
-	if len(m.Sources) != 0 {
-		t.Fatalf("sources = %v, want empty", m.Sources)
-	}
-
-	if !SameSource("owner/repo@v1.0.0", "Owner/Repo@latest") {
-		t.Fatal("SameSource should ignore case and version queries")
-	}
-	if SameSource("owner/repo", "owner/other") {
-		t.Fatal("SameSource should not match different repos")
-	}
-}
-
-func TestSetSourceVersion(t *testing.T) {
-	t.Parallel()
-	m := &Manifest{}
-
-	m.SetSourceVersion("owner/repo@v1.0.0", "v1.0.0")
-	m.SetSourceVersion("Owner/Repo", "v2.0.0")
-
-	if len(m.Sources) != 1 {
-		t.Fatalf("sources = %v, want one entry across spellings", m.Sources)
-	}
-	src, ok := m.GetSource("OWNER/REPO")
-	if !ok || src.Repo != "owner/repo" || src.Version != "v2.0.0" {
-		t.Fatalf("source = %+v, want first-seen spelling with the updated version", src)
+	if record, ok := m.GetSource(Source{Repo: "owner/repo"}); !ok || record.Version != "" {
+		t.Fatalf("source = (%+v, %v), want listed without a version", record, ok)
 	}
 }
 
@@ -301,10 +233,6 @@ sources:
   - owner/repo
 `
 	writeManifestFile(t, home, legacy)
-	stubResolveLatest(t, func(repo string) (string, error) {
-		t.Fatal("a migrated pin must not need resolution")
-		return "", nil
-	})
 
 	if _, err := LoadManifest(); err != nil {
 		t.Fatalf("LoadManifest() error = %v", err)
