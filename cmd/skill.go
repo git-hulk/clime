@@ -29,23 +29,22 @@ var installCmd = &cobra.Command{
 
 var installSkillCmd = &cobra.Command{
 	Use:   "skill",
-	Short: "Install the clime-cli skill into ~/.claude/skills and ~/.codex/skills",
+	Short: "Install the clime-cli skill into ~/.agents/skills with a Claude symlink",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		targets, err := skill.Targets()
 		if err != nil {
 			return err
 		}
 
-		installed := 0
 		for _, t := range targets {
-			if !t.Exists() {
+			if t.Name != "agents" && !t.Exists() {
 				terminal.Warningf("Skipping %s (directory not found)", t.Dir)
 				continue
 			}
 
 			files := map[string][]byte{skillFileName: []byte(SkillContent)}
-			// Codex discovers skills through agents/openai.yaml.
-			if t.Name == "codex" {
+			// Include the bundled agent metadata in the shared skill.
+			if t.Name == "agents" {
 				files[filepath.Join("agents", "openai.yaml")] = []byte(AgentYAML)
 			}
 			if err := t.Install(skillDirName, files); err != nil {
@@ -53,11 +52,6 @@ var installSkillCmd = &cobra.Command{
 			}
 
 			terminal.Successf("Installed skill to %s", filepath.Join(t.Dir, "skills", skillDirName, skillFileName))
-			installed++
-		}
-
-		if installed == 0 {
-			terminal.Warning("No skill directories were installed. Neither ~/.claude nor ~/.codex was found.")
 		}
 		return nil
 	},

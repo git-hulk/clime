@@ -107,6 +107,10 @@ func TestManagerInstallEndToEnd(t *testing.T) {
 	if got := readInstalledSkill(t, home, "alpha"); got != "# Alpha" {
 		t.Fatalf("SKILL.md = %q", got)
 	}
+	shared := filepath.Join(home, ".agents", "skills", "alpha")
+	if got, err := os.Readlink(filepath.Join(home, ".claude", "skills", "alpha")); err != nil || got != shared {
+		t.Fatalf("Claude link = %q, %v, want %q", got, err, shared)
+	}
 	extra, err := os.ReadFile(filepath.Join(home, ".claude", "skills", "alpha", "extra.txt"))
 	if err != nil || string(extra) != "extra" {
 		t.Fatalf("extra.txt = %q, %v", extra, err)
@@ -124,11 +128,13 @@ func TestManagerInstallEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Uninstall() error = %v", err)
 	}
-	if len(removed) != 1 || removed[0] != "claude" {
-		t.Fatalf("Uninstall() = %v, want [claude]", removed)
+	if len(removed) != 2 || removed[0] != "agents" || removed[1] != "claude" {
+		t.Fatalf("Uninstall() = %v, want [agents claude]", removed)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "alpha")); !os.IsNotExist(err) {
-		t.Fatal("skill directory still exists after Uninstall")
+	for _, dir := range []string{shared, filepath.Join(home, ".claude", "skills", "alpha")} {
+		if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+			t.Fatalf("skill path %s still exists after Uninstall: %v", dir, err)
+		}
 	}
 	if _, ok := mgr.Manifest.GetSkill("alpha"); ok {
 		t.Fatal("manifest still lists the skill after Uninstall")

@@ -62,8 +62,8 @@ func init() {
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Manage AI agent skills from GitHub repositories or local paths",
-	Long: "Install skills from GitHub repositories or local paths into ~/.claude/skills and ~/.codex/skills " +
-		"for use with Claude Code and Codex.",
+	Long: "Install skills from GitHub repositories or local paths into ~/.agents/skills. " +
+		"When ~/.claude exists, Claude Code gets symlinks in ~/.claude/skills.",
 	RunE: skillsListCmd.RunE,
 }
 
@@ -317,7 +317,7 @@ func (u *skillsUI) SkillFailed(verb skill.Verb, name string, err error) {
 
 func (u *skillsUI) NoTargets() {
 	u.finish(func(s *uicli.Spinner) { s.Stop() })
-	terminal.Warning("No skill directories were installed. Neither ~/.claude nor ~/.codex was found.")
+	terminal.Warning("No skill directories were installed.")
 }
 
 func runInteractiveSkillsInstall(manifest *skill.Manifest) error {

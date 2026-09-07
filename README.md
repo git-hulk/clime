@@ -83,9 +83,15 @@ Install the bundled clime-cli skill so agents can discover and manage plugins on
 clime install skill
 ```
 
-This writes the skill file to `~/.claude/skills/` and `~/.codex/skills/`.
+This installs the skill into `~/.agents/skills/clime-cli/`. When `~/.claude`
+exists, `~/.claude/skills/clime-cli` is a symlink to that directory.
 
 ### Skills from repositories
+
+Skills use the same layout: files in `~/.agents/skills/<name>/`, a symlink in
+`~/.claude/skills/<name>` when `~/.claude` exists. Reinstalling or syncing an
+existing skill replaces its old Claude directory with the symlink. Uninstall
+removes the shared files and Claude link.
 
 Install, update, sync, list, and uninstall skills from GitHub repositories or local paths:
 

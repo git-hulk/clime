@@ -6,8 +6,7 @@ import (
 	"path/filepath"
 )
 
-// Target is one agent destination for installed skills, such as
-// ~/.claude or ~/.codex.
+// Target is a destination for installed skills: ~/.agents or ~/.claude.
 type Target struct {
 	Name string
 	Dir  string
@@ -15,8 +14,8 @@ type Target struct {
 
 // targetHomes lists the known agent dot-directories and their display names.
 var targetHomes = []struct{ name, dir string }{
+	{"agents", ".agents"},
 	{"claude", ".claude"},
-	{"codex", ".codex"},
 }
 
 // Targets returns every known target, whether or not its base directory
@@ -33,7 +32,8 @@ func Targets() ([]Target, error) {
 	return targets, nil
 }
 
-// DetectTargets returns the targets whose base directory exists.
+// DetectTargets always includes the shared skills target, followed by agent
+// targets whose base directory exists.
 func DetectTargets() ([]Target, error) {
 	all, err := Targets()
 	if err != nil {
@@ -41,7 +41,7 @@ func DetectTargets() ([]Target, error) {
 	}
 	var detected []Target
 	for _, t := range all {
-		if t.Exists() {
+		if t.Name == "agents" || t.Exists() {
 			detected = append(detected, t)
 		}
 	}
@@ -59,8 +59,22 @@ func (t Target) skillDir(name string) string {
 }
 
 // Install writes the given skill files under <Dir>/skills/<name>/.
+// The Claude target links to the shared copy, which must be installed first.
 func (t Target) Install(name string, files map[string][]byte) error {
 	dir := t.skillDir(name)
+	if t.Name == "claude" {
+		shared := filepath.Join(filepath.Dir(t.Dir), ".agents", "skills", name)
+		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+			return fmt.Errorf("failed to create skills directory: %w", err)
+		}
+		if _, err := t.Remove(name); err != nil {
+			return err
+		}
+		if err := os.Symlink(shared, dir); err != nil {
+			return fmt.Errorf("failed to link %s to %s: %w", dir, shared, err)
+		}
+		return nil
+	}
 	for rel, content := range files {
 		dest := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -76,8 +90,11 @@ func (t Target) Install(name string, files map[string][]byte) error {
 // Remove deletes <Dir>/skills/<name>/, reporting whether it existed.
 func (t Target) Remove(name string) (bool, error) {
 	dir := t.skillDir(name)
-	if _, err := os.Stat(dir); err != nil {
-		return false, nil
+	if _, err := os.Lstat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to inspect %s: %w", dir, err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return false, fmt.Errorf("failed to remove %s: %w", dir, err)

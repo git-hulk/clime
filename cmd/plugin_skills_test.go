@@ -89,7 +89,7 @@ This is a test skill.
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
-	// Create .claude and .codex directories so installFiles writes to them.
+	// Create both agent directories to verify only Claude gets a skill link.
 	for _, dir := range []string{".claude", ".codex"} {
 		if err := os.MkdirAll(filepath.Join(homeDir, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -99,11 +99,18 @@ This is a test skill.
 	tryInstallPluginSkills("withskills")
 
 	// Verify skill files were installed.
-	for _, dir := range []string{".claude", ".codex"} {
+	for _, dir := range []string{".agents", ".claude"} {
 		installed := filepath.Join(homeDir, dir, "skills", "test-skill", "SKILL.md")
 		if _, err := os.Stat(installed); err != nil {
 			t.Errorf("expected skill file at %s, got error: %v", installed, err)
 		}
+	}
+	shared := filepath.Join(homeDir, ".agents", "skills", "test-skill")
+	if got, err := os.Readlink(filepath.Join(homeDir, ".claude", "skills", "test-skill")); err != nil || got != shared {
+		t.Fatalf("Claude link = %q, %v, want %q", got, err, shared)
+	}
+	if _, err := os.Lstat(filepath.Join(homeDir, ".codex", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("plugin skill install must not create ~/.codex/skills: %v", err)
 	}
 
 	// Verify skill manifest was updated.
