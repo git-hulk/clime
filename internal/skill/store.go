@@ -101,6 +101,30 @@ func (st *Store) Remove(src Source) error {
 	return os.RemoveAll(st.repoDir(src))
 }
 
+// prune removes a source's cached snapshots except the installed version.
+func (st *Store) prune(src Source, version string) error {
+	base := st.repoDir(src)
+	parent := filepath.Dir(base)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return err
+	}
+	prefix := filepath.Base(base) + "@"
+	keep := versionDir(base, version)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		dir := filepath.Join(parent, entry.Name())
+		if dir != keep {
+			if err := os.RemoveAll(dir); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // repoDir returns the base cache path for a source repository; version
 // directories live beside it, keyed by versionDir.
 func (st *Store) repoDir(src Source) string {

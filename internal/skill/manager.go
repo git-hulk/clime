@@ -117,7 +117,8 @@ func (m *Manager) Fetch(src Source) (*Snapshot, *Catalog, error) {
 
 // Install installs the given catalog entries from a snapshot into every
 // target and records them in the manifest. It continues past per-skill
-// failures and returns how many skills succeeded.
+// failures and returns how many skills succeeded. After successful
+// installation, other cached versions of the source are removed.
 func (m *Manager) Install(snap *Snapshot, entries []Entry) (int, error) {
 	return m.install(VerbInstall, snap, entries)
 }
@@ -125,7 +126,8 @@ func (m *Manager) Install(snap *Snapshot, entries []Entry) (int, error) {
 // Update moves one source to the version its query resolves to (latest
 // when it carries none), re-installing its installed skills from the new
 // catalog. The update is refused when the new catalog no longer lists an
-// installed skill, so a skill is never removed implicitly. Returns how
+// installed skill, so a skill is never removed implicitly. After successful
+// installation, other cached versions of the source are removed. Returns how
 // many skills changed; zero with a nil error means already up to date.
 func (m *Manager) Update(src Source) (int, error) {
 	ev := m.events()
@@ -175,7 +177,8 @@ func (m *Manager) Update(src Source) (int, error) {
 // Sync re-installs a source's skills at the version locked in the
 // manifest, using the stored skill paths, and returns how many skills it
 // re-installed. A source without a locked version is installed at latest
-// and the resolved version is recorded.
+// and the resolved version is recorded. After successful installation,
+// other cached versions of the source are removed.
 func (m *Manager) Sync(src Source) (int, error) {
 	ev := m.events()
 	installed := m.Manifest.SkillsFrom(src)
@@ -229,7 +232,8 @@ func (m *Manager) Uninstall(name string) ([]string, error) {
 }
 
 // install installs each entry in turn, reporting failures as they happen,
-// and returns how many succeeded.
+// and returns how many succeeded. It prunes other snapshots only after
+// every entry has been installed and saved to the manifest.
 func (m *Manager) install(verb Verb, snap *Snapshot, entries []Entry) (int, error) {
 	failed := 0
 	for _, entry := range entries {
@@ -240,6 +244,11 @@ func (m *Manager) install(verb Verb, snap *Snapshot, entries []Entry) (int, erro
 	}
 	if failed > 0 {
 		return len(entries) - failed, fmt.Errorf("%d skill(s) failed", failed)
+	}
+	if len(entries) > 0 && snap.Version != "" && len(m.Targets) > 0 {
+		if err := m.Store.prune(snap.Source, snap.Version); err != nil {
+			return len(entries), fmt.Errorf("skills installed but failed to remove old snapshots: %w", err)
+		}
 	}
 	return len(entries), nil
 }

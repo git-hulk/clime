@@ -106,7 +106,7 @@ Gray nodes and edges are unchanged, green paths are added, and red dashed paths 
 
 Snapshot caches will live under `~/.clime/cache`, addressed by canonical repository and a filesystem-safe version. clime will fetch, check out, and validate a snapshot in a temporary directory, then commit it to the cache with a rename. A committed cache entry is immutable: clime will never run `git pull` or edit it in place. Internal cache metadata may record the resolved commit and source details, but this metadata will not be added to `skills.yaml`.
 
-`sync` will not access the network when every referenced snapshot is cached, allowing a cached private repository to recover while credentials or the network are temporarily unavailable. Multiple versions of one repository may coexist, so changing the manifest back to an older version can reconcile directly from cache.
+`sync` will not access the network when every referenced snapshot is cached, allowing a cached private repository to recover while credentials or the network are temporarily unavailable. Multiple versions may coexist while preparing an installation. After all selected skills are installed and the manifest is saved successfully, `install`, `update`, and `sync` remove other snapshots of that repository and keep the installed version. Failed operations retain existing snapshots. Returning to a removed version requires fetching it again.
 
 `clime skills purge` will validate the complete manifest and delete every cache entry that the manifest does not reference. It will not remove referenced snapshots, installed skills, or transaction-recovery backups. The first version will not evict entries automatically by age or size because that could remove a version needed for rollback.
 

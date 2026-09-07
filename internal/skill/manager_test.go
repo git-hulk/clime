@@ -309,6 +309,12 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 	if got := sourceVersion(); got != "v2.0.0" {
 		t.Fatalf("after update, locked version = %q, want v2.0.0", got)
 	}
+	if dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")) {
+		t.Fatal("successful update must remove the old snapshot")
+	}
+	if !dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")) {
+		t.Fatal("successful update must keep the installed snapshot")
+	}
 
 	events := &recordingEvents{}
 	mgr.Events = events
@@ -328,6 +334,9 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 	}
 	if got := sourceVersion(); got != "v1.0.0" {
 		t.Fatalf("after pinning v1.0.0, locked version = %q", got)
+	}
+	if dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")) {
+		t.Fatal("successful downgrade must remove the superseded snapshot")
 	}
 }
 
@@ -369,6 +378,109 @@ func TestUpdateRefusesWhenCatalogDropsInstalledSkill(t *testing.T) {
 	}
 	if _, ok := manifest.GetSkill("beta"); !ok {
 		t.Fatal("a refused update must keep beta in the manifest")
+	}
+	if !dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")) {
+		t.Fatal("a refused update must keep the old snapshot")
+	}
+}
+
+func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T) {
+	for _, verb := range []Verb{VerbInstall, VerbUpdate, VerbSync} {
+		t.Run(verb.String(), func(t *testing.T) {
+			for _, failure := range []string{"success", "target", "manifest", "no targets"} {
+				t.Run(failure, func(t *testing.T) {
+					remote := newSkillRemote(t)
+					remote.release("v1.0.0", map[string]string{"alpha": "# v1"})
+					src := Source{Repo: remote.URL}
+					manifest := &Manifest{
+						Skills:  []InstalledSkill{{Name: "alpha", Source: src.Repo, Path: "skills/alpha"}},
+						Sources: []SourceRecord{{Repo: src.Repo, Version: "v1.0.0"}},
+					}
+					mgr, home := newTestManager(t, manifest)
+					if _, err := mgr.Sync(src); err != nil {
+						t.Fatal(err)
+					}
+					base := mgr.Store.repoDir(src)
+					stale := versionDir(base, "v0.1.0")
+					other := versionDir(base+"-other", "v1.0.0")
+					for _, dir := range []string{stale, other} {
+						writeFile(t, filepath.Join(dir, "SKILL.md"), "keep unless superseded")
+					}
+					remote.release("v2.0.0", map[string]string{"alpha": "# v2"})
+					snap, catalog, err := mgr.Fetch(src.WithQuery("v2.0.0"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if verb == VerbSync {
+						manifest.SetSourceVersion(src, "v2.0.0")
+						if err := manifest.Save(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if verb == VerbInstall {
+						if n, err := mgr.Install(snap, nil); err != nil || n != 0 {
+							t.Fatalf("Install() with no entries = (%d, %v), want (0, nil)", n, err)
+						}
+						if !dirExists(stale) {
+							t.Fatal("install with no entries must retain old snapshots")
+						}
+					}
+					switch failure {
+					case "target":
+						// Fail on the second target, after the first has been updated.
+						blocked := filepath.Join(home, "blocked")
+						writeFile(t, blocked, "not a directory")
+						mgr.Targets[1].Dir = blocked
+					case "manifest":
+						path, err := manifestPath()
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Remove(path); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Mkdir(path, 0o755); err != nil {
+							t.Fatal(err)
+						}
+					case "no targets":
+						mgr.Targets = nil
+					}
+					switch verb {
+					case VerbInstall:
+						_, err = mgr.Install(snap, catalog.Skills)
+					case VerbUpdate:
+						_, err = mgr.Update(src)
+					case VerbSync:
+						_, err = mgr.Sync(src)
+					}
+					wantErr := failure == "target" || failure == "manifest"
+					if (err != nil) != wantErr {
+						t.Fatalf("%s error = %v, want error: %v", verb, err, wantErr)
+					}
+					for _, dir := range []string{stale, versionDir(base, "v1.0.0")} {
+						if got, want := dirExists(dir), failure != "success"; got != want {
+							t.Fatalf("snapshot %s exists = %v, want %v", dir, got, want)
+						}
+					}
+					for _, dir := range []string{other, versionDir(base, "v2.0.0")} {
+						if !dirExists(dir) {
+							t.Fatalf("snapshot %s must be retained", dir)
+						}
+					}
+					if failure == "success" {
+						if err := os.Rename(remote.dir, filepath.Join(t.TempDir(), "offline")); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := mgr.Sync(src); err != nil {
+							t.Fatalf("Sync() offline after cleanup: %v", err)
+						}
+						if got := readInstalledSkill(t, home, "alpha"); got != "# v2" {
+							t.Fatalf("offline sync installed %q, want # v2", got)
+						}
+					}
+				})
+			}
+		})
 	}
 }
 

@@ -130,6 +130,11 @@ offline), while `update` resolves a newer version and rewrites the lock. An upda
 is refused when the new version no longer provides an installed skill, so skills
 are never removed implicitly.
 
+After a successful `install`, `update`, or `sync`, clime keeps the installed
+version's snapshot and deletes the other cached versions of that repository.
+Failed operations retain existing snapshots. Downgrading to a removed version
+fetches it again.
+
 For GitHub operations, clime checks `gh auth status --hostname github.com`.
 When logged in, it uses `gh` for version lookups, skill archive downloads,
 and release downloads. Skill installs, updates, and syncs share this behavior.
