@@ -16,6 +16,14 @@ var (
 	semverQueryPattern = regexp.MustCompile(`^v\d+(\.\d+)?$`)
 )
 
+// versionRefs supplies the remote references used by version selection.
+type versionRefs interface {
+	remoteTags() ([]string, error)
+	remoteRefCommit(string) (string, bool, error)
+	expandShortSHA(string) (string, error)
+	String() string
+}
+
 // resolveVersion resolves a version query against the remote's advertised
 // refs, following the same rules as `go get`:
 //
@@ -31,7 +39,7 @@ var (
 //
 // The result is always a concrete tag or full commit SHA, never a floating
 // value.
-func resolveVersion(src Source, query string) (string, error) {
+func resolveVersion(src versionRefs, query string) (string, error) {
 	if fullSHAPattern.MatchString(query) {
 		return query, nil
 	}
@@ -39,7 +47,7 @@ func resolveVersion(src Source, query string) (string, error) {
 		return resolveLatest(src)
 	}
 
-	tags, err := remoteTags(src)
+	tags, err := src.remoteTags()
 	if err != nil {
 		return "", err
 	}
@@ -52,33 +60,33 @@ func resolveVersion(src Source, query string) (string, error) {
 		if v := maxSemverTag(tags, query); v != "" {
 			return v, nil
 		}
-		return "", fmt.Errorf("no version of %s matches query %q", src.Repo, query)
+		return "", fmt.Errorf("no version of %s matches query %q", src, query)
 	}
-	if sha, ok, err := remoteRefCommit(src, "refs/heads/"+query); err != nil {
+	if sha, ok, err := src.remoteRefCommit("refs/heads/" + query); err != nil {
 		return "", err
 	} else if ok {
 		return sha, nil
 	}
 	if shortSHAPattern.MatchString(query) {
-		return expandShortSHA(src, query)
+		return src.expandShortSHA(query)
 	}
-	return "", fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, src.Repo)
+	return "", fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, src)
 }
 
-func resolveLatest(src Source) (string, error) {
-	tags, err := remoteTags(src)
+func resolveLatest(src versionRefs) (string, error) {
+	tags, err := src.remoteTags()
 	if err != nil {
 		return "", err
 	}
 	if v := maxSemverTag(tags, ""); v != "" {
 		return v, nil
 	}
-	sha, ok, err := remoteRefCommit(src, "HEAD")
+	sha, ok, err := src.remoteRefCommit("HEAD")
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", src.Repo)
+		return "", fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", src)
 	}
 	return sha, nil
 }
@@ -143,7 +151,7 @@ func lsRemote(src Source, flags []string, refs ...string) ([]string, error) {
 
 // remoteTags lists the remote's tag names, with annotated-tag peel entries
 // ("^{}") folded into their tag.
-func remoteTags(src Source) ([]string, error) {
+func (src Source) remoteTags() ([]string, error) {
 	lines, err := lsRemote(src, []string{"--tags"})
 	if err != nil {
 		return nil, err
@@ -166,7 +174,7 @@ func remoteTags(src Source) ([]string, error) {
 
 // remoteRefCommit returns the commit SHA the given ref points to, and
 // whether the remote advertises that ref.
-func remoteRefCommit(src Source, ref string) (string, bool, error) {
+func (src Source) remoteRefCommit(ref string) (string, bool, error) {
 	lines, err := lsRemote(src, nil, ref)
 	if err != nil {
 		return "", false, err
@@ -182,7 +190,7 @@ func remoteRefCommit(src Source, ref string) (string, bool, error) {
 
 // expandShortSHA expands a commit SHA prefix to the full SHA when it
 // uniquely matches one of the remote's advertised refs.
-func expandShortSHA(src Source, prefix string) (string, error) {
+func (src Source) expandShortSHA(prefix string) (string, error) {
 	lines, err := lsRemote(src, nil)
 	if err != nil {
 		return "", err

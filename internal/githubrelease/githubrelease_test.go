@@ -1,6 +1,64 @@
 package githubrelease
 
-import "testing"
+import (
+	"archive/tar"
+	"compress/gzip"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestAuthenticatedGitHubReleases(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "release.tar.gz")
+	file, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "clime", Mode: 0o755, Size: 6}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("binary")); err != nil {
+		t.Fatal(err)
+	}
+	for _, close := range []func() error{tw.Close, gz.Close, file.Close} {
+		if err := close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CLIME_TEST_ARCHIVE", archive)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := `#!/bin/sh
+if [ "$1" = auth ]; then exit 0; fi
+if [ "$CLIME_TEST_GH_FAIL" = 1 ]; then exit 1; fi
+case "$2" in
+  view) printf '%s\n' '{"tagName":"v1.2.3","assets":[{"name":"clime.tar.gz","url":"https://github.com/owner/repo/releases/download/v1.2.3/clime.tar.gz"}]}' ;;
+  download) /bin/cat "$CLIME_TEST_ARCHIVE" ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	release, err := FetchLatest("owner/repo")
+	if err != nil || release.TagName != "v1.2.3" || len(release.Assets) != 1 {
+		t.Fatalf("release = %+v, %v", release, err)
+	}
+	downloadURL := release.Assets[0].BrowserDownloadURL
+	if body, err := DownloadTarGzBinary(downloadURL, "clime"); err != nil || string(body) != "binary" {
+		t.Fatalf("binary = %q, %v", body, err)
+	}
+	t.Setenv("CLIME_TEST_GH_FAIL", "1")
+	if _, err := FetchLatest("owner/repo"); err == nil || !strings.Contains(err.Error(), "gh release view") {
+		t.Fatalf("authenticated lookup must report gh failure: %v", err)
+	}
+	if _, err := DownloadTarGzBinary(downloadURL, "clime"); err == nil || !strings.Contains(err.Error(), "gh release download") {
+		t.Fatalf("authenticated download must report gh failure: %v", err)
+	}
+}
 
 func TestReleaseVersion(t *testing.T) {
 	t.Parallel()

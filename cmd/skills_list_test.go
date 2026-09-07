@@ -81,10 +81,10 @@ func TestSkillListPagesNavigateAtBoundaries(t *testing.T) {
 	}
 }
 
-func TestSkillListPipedOutputIncludesEverySkill(t *testing.T) {
+func TestSkillListPipedOutputIncludesEverySkillInNameOrder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	manifest := &skill.Manifest{}
-	for i := 1; i <= 21; i++ {
+	for i := 21; i >= 1; i-- {
 		manifest.AddSkill(skill.InstalledSkill{Name: fmt.Sprintf("skill-%02d", i), Source: "owner/repo"})
 	}
 	if err := manifest.Save(); err != nil {
@@ -97,5 +97,14 @@ func TestSkillListPipedOutputIncludesEverySkill(t *testing.T) {
 	})
 	if got := strings.Count(output, "skill-"); got != 21 {
 		t.Fatalf("piped output contains %d skills, want 21", got)
+	}
+	previous := -1
+	for i := 1; i <= 21; i++ {
+		name := fmt.Sprintf("skill-%02d", i)
+		index := strings.Index(output, name)
+		if index <= previous {
+			t.Fatalf("%s is missing or out of ascending order", name)
+		}
+		previous = index
 	}
 }

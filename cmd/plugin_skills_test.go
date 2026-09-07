@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/prompt"
@@ -23,7 +24,7 @@ func TestInstallFromPluginSkillsUsesLockedCacheOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
-		"skills.yaml":    "skills:\n  - name: alpha\n    path: alpha\n",
+		"skills.yaml":    "skills:\n  - name: beta\n    path: beta\n  - name: alpha\n    path: alpha\n",
 		"alpha/SKILL.md": "# cached alpha",
 	} {
 		if err := os.WriteFile(filepath.Join(cache, path), []byte(content), 0o644); err != nil {
@@ -33,8 +34,8 @@ func TestInstallFromPluginSkillsUsesLockedCacheOffline(t *testing.T) {
 	manifest := &skill.Manifest{Sources: []skill.SourceRecord{{Repo: "owner/repo", Version: "v1.0.0"}}}
 	defer stubSkillPrompts(t)()
 	multiSelectPrompt = func(config prompt.SelectConfig) ([]int, error) {
-		if len(config.Options) != 1 {
-			t.Fatalf("options = %v, want the cached alpha skill", config.Options)
+		if !slices.Equal(config.Options, []string{"alpha — cached", "beta — cached"}) {
+			t.Fatalf("options = %v, want alpha then beta", config.Options)
 		}
 		return []int{0}, nil
 	}

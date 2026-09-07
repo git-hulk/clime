@@ -130,6 +130,12 @@ offline), while `update` resolves a newer version and rewrites the lock. An upda
 is refused when the new version no longer provides an installed skill, so skills
 are never removed implicitly.
 
+For GitHub operations, clime checks `gh auth status --hostname github.com`.
+When logged in, it uses `gh` for version lookups, skill archive downloads,
+and release downloads. Skill installs, updates, and syncs share this behavior.
+If `gh` is unavailable or logged out, skills use Git and releases use HTTP.
+Other Git hosts continue to use Git. Downloads show progress during installation.
+
 ## Shell Completions
 
 Generate shell completion scripts for bash, zsh, fish, or PowerShell:

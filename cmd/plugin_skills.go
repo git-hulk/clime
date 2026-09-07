@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
@@ -116,6 +117,7 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 		return err
 	}
 
+	mgr.Store.Progress = fetchProgress(spinner)
 	// Collect skills from all plugin sources.
 	type skillCandidate struct {
 		entry skill.Entry
@@ -157,6 +159,9 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 
 	spinner.Success(fmt.Sprintf("Found %d skill(s) from %d plugin(s)", len(candidates), len(sources)))
 
+	slices.SortStableFunc(candidates, func(a, b skillCandidate) int {
+		return strings.Compare(a.entry.Name, b.entry.Name)
+	})
 	options := make([]string, len(candidates))
 	for i, c := range candidates {
 		options[i] = c.label

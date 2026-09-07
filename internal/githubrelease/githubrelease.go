@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/git-hulk/clime/internal/githubcli"
 )
 
 const apiBase = "https://api.github.com"
@@ -38,11 +40,6 @@ func (r *Release) FindTarGzAsset(prefix, goos, goarch string) (*Asset, error) {
 		}
 	}
 	return nil, fmt.Errorf("no release asset found for %s/%s (looked for %s*%s)", goos, goarch, prefix, suffix)
-}
-
-// ghCLIAuthed returns true if the gh CLI is installed and authenticated.
-func ghCLIAuthed() bool {
-	return exec.Command("gh", "auth", "status").Run() == nil
 }
 
 // ghRelease is the JSON shape returned by `gh release view --json tagName,assets`.
@@ -79,10 +76,8 @@ func fetchLatestViaGH(repo string) (*Release, error) {
 }
 
 func FetchLatest(repo string) (*Release, error) {
-	if ghCLIAuthed() {
-		if r, err := fetchLatestViaGH(repo); err == nil {
-			return r, nil
-		}
+	if githubcli.Authenticated() {
+		return fetchLatestViaGH(repo)
 	}
 
 	url := fmt.Sprintf("%s/repos/%s/releases/latest", apiBase, repo)
@@ -134,15 +129,16 @@ func parseGitHubDownloadURL(downloadURL string) (repo, assetName string, ok bool
 func DownloadTarGzBinary(downloadURL, binaryName string) ([]byte, error) {
 	var archiveData []byte
 
-	if repo, assetName, ok := parseGitHubDownloadURL(downloadURL); ok && ghCLIAuthed() {
+	if repo, assetName, ok := parseGitHubDownloadURL(downloadURL); ok && githubcli.Authenticated() {
 		out, err := exec.Command("gh", "release", "download",
 			"--repo", repo,
 			"--pattern", assetName,
 			"--output", "-",
 		).Output()
-		if err == nil {
-			archiveData = out
+		if err != nil {
+			return nil, fmt.Errorf("gh release download: %w", err)
 		}
+		archiveData = out
 	}
 
 	if archiveData == nil {

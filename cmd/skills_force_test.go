@@ -64,3 +64,27 @@ func TestSelectInstallCandidatesForceEmptyRepo(t *testing.T) {
 		t.Fatalf("candidates = %d, want 0 for empty repo", len(got))
 	}
 }
+
+func TestSelectInstallCandidatesSortedByName(t *testing.T) {
+	manifest := &skill.Manifest{Skills: []skill.InstalledSkill{{Name: "beta"}}}
+	entries := []skill.Entry{
+		{Name: "zebra", Path: "first"},
+		{Name: "beta", Path: "second"},
+		{Name: "alpha", Path: "third"},
+	}
+	for _, force := range []bool{false, true} {
+		want := []skill.Entry{entries[2], entries[0]}
+		if force {
+			want = []skill.Entry{entries[2], entries[1], entries[0]}
+		}
+		got := selectInstallCandidates(entries, manifest, force)
+		if len(got) != len(want) {
+			t.Fatalf("force=%v: got %d candidates, want %d", force, len(got), len(want))
+		}
+		for i, entry := range want {
+			if got[i].entry.Name != entry.Name || got[i].entry.Path != entry.Path || !strings.HasPrefix(got[i].label, entry.Name) {
+				t.Fatalf("force=%v: candidate %d = %+v, want %+v", force, i, got[i], entry)
+			}
+		}
+	}
+}

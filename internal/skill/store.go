@@ -1,17 +1,25 @@
 package skill
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/git-hulk/clime/internal/githubcli"
 )
 
 // Store owns the version cache under ~/.clime/sources/: one immutable
-// directory per (source, resolved version), never mutated after clone.
+// directory per (source, resolved version), never mutated after fetching.
 type Store struct {
 	Root string
+	// Progress receives download updates as they arrive. Nil keeps fetches silent.
+	Progress   func(string)
+	ghAuthOnce sync.Once
+	ghAuthed   bool
 }
 
 // Snapshot is a Source materialized on disk at one concrete version.
@@ -57,14 +65,32 @@ func (st *Store) Snapshot(src Source) (*Snapshot, error) {
 	if dir := versionDir(base, query); dirExists(dir) {
 		return &Snapshot{Source: src, Dir: dir, Version: query}, nil
 	}
-	resolved, err := resolveVersion(src, query)
+	repo := src.githubRepo()
+	if repo != "" {
+		st.ghAuthOnce.Do(func() { st.ghAuthed = githubcli.Authenticated() })
+		if !st.ghAuthed {
+			repo = ""
+		}
+	}
+	var resolved string
+	var err error
+	if repo != "" {
+		resolved, err = resolveVersion(&githubSource{Source: Source{Repo: repo}}, query)
+	} else {
+		resolved, err = resolveVersion(src, query)
+	}
 	if err != nil {
 		return nil, err
 	}
 	dir := versionDir(base, resolved)
 	if !dirExists(dir) {
-		if err := cloneAtVersion(src, resolved, dir); err != nil {
-			return nil, fmt.Errorf("failed to clone %s at %s: %w", src.Repo, resolved, err)
+		if repo != "" {
+			err = downloadGitHubArchive(repo, resolved, dir, st.Progress)
+		} else {
+			err = cloneAtVersion(src, resolved, dir, st.Progress)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch %s at %s: %w", src.Repo, resolved, err)
 		}
 	}
 	return &Snapshot{Source: src, Dir: dir, Version: resolved}, nil
@@ -156,31 +182,43 @@ func (s *Snapshot) SkillFiles(path string) (map[string][]byte, error) {
 
 // cloneAtVersion clones a source checked out at the given version (a tag,
 // branch, or commit SHA) into dir. Tags and branches are cloned directly;
-// a commit SHA falls back to cloning the default branch and fetching the
-// commit.
-func cloneAtVersion(src Source, version, dir string) error {
+// commit SHAs are fetched into an empty repository to avoid downloading
+// the default branch first.
+func cloneAtVersion(src Source, version, dir string, progress func(string)) error {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", version, src.CloneURL(), dir)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if _, err := cmd.CombinedOutput(); err == nil {
+	if !fullSHAPattern.MatchString(version) {
+		args := []string{"clone", "--depth", "1", "--branch", version}
+		if progress != nil {
+			args = append(args, "--progress")
+		}
+		cmd := exec.Command("git", append(args, src.CloneURL(), dir)...)
+		if out, err := runGitProgress(cmd, progress); err != nil {
+			os.RemoveAll(dir)
+			return fmt.Errorf("git clone failed: %w\n%s", err, out)
+		}
 		return nil
 	}
-	os.RemoveAll(dir)
 
-	if err := cloneDefault(src, dir); err != nil {
-		return err
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create checkout directory: %w", err)
 	}
 	for _, args := range [][]string{
+		{"init"},
+		{"remote", "add", "origin", src.CloneURL()},
 		{"fetch", "--depth", "1", "origin", version},
 		{"checkout", "--detach", "FETCH_HEAD"},
 	} {
+		var report func(string)
+		if args[0] == "fetch" && progress != nil {
+			args = append([]string{"fetch", "--progress"}, args[1:]...)
+			report = progress
+		}
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := runGitProgress(cmd, report); err != nil {
 			os.RemoveAll(dir)
 			return fmt.Errorf("failed to check out version %q: %w\n%s", version, err, out)
 		}
@@ -188,20 +226,41 @@ func cloneAtVersion(src Source, version, dir string) error {
 	return nil
 }
 
-// cloneDefault performs a shallow clone of the default branch, trying the
-// GitHub CLI (gh) first and falling back to git.
-func cloneDefault(src Source, dir string) error {
-	cmd := exec.Command("gh", "repo", "clone", src.Repo, dir, "--", "--depth", "1")
-	if _, err := cmd.CombinedOutput(); err == nil {
-		return nil
-	}
-	os.RemoveAll(dir)
+// gitProgress captures diagnostics while forwarding complete Git progress
+// lines. Git uses carriage returns for progress and newlines for messages.
+type gitProgress struct {
+	output bytes.Buffer
+	line   strings.Builder
+	report func(string)
+}
 
-	cmd = exec.Command("git", "clone", "--depth", "1", src.CloneURL(), dir)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
-		return fmt.Errorf("git clone failed: %w\n%s", err, out)
+func (p *gitProgress) Write(data []byte) (int, error) {
+	p.output.Write(data)
+	if p.report != nil {
+		for _, b := range data {
+			if b == '\r' || b == '\n' {
+				p.flush()
+			} else {
+				p.line.WriteByte(b)
+			}
+		}
 	}
-	return nil
+	return len(data), nil
+}
+
+func (p *gitProgress) flush() {
+	if line := strings.TrimSpace(p.line.String()); line != "" {
+		p.report(line)
+	}
+	p.line.Reset()
+}
+
+func runGitProgress(cmd *exec.Cmd, report func(string)) (string, error) {
+	output := &gitProgress{report: report}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	err := cmd.Run()
+	output.flush()
+	return output.output.String(), err
 }

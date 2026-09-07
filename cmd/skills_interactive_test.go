@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -217,6 +218,26 @@ func TestInteractiveUninstallInterruptPropagates(t *testing.T) {
 	err := interactiveUninstall(manifest)
 	if !errors.Is(err, prompt.ErrInterrupted) {
 		t.Fatalf("interactiveUninstall() error = %v, want ErrInterrupted", err)
+	}
+}
+
+func TestInteractiveUninstallUsesSortedSelection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	manifest := &skill.Manifest{Skills: []skill.InstalledSkill{
+		{Name: "zebra"}, {Name: "beta"}, {Name: "alpha"},
+	}}
+	defer stubSkillPrompts(t)()
+	multiSelectPrompt = func(config prompt.SelectConfig) ([]int, error) {
+		if !slices.Equal(config.Options, []string{"alpha", "beta", "zebra"}) {
+			t.Fatalf("options = %v, want ascending names", config.Options)
+		}
+		return []int{0, 1}, nil
+	}
+	if err := interactiveUninstall(manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Skills) != 1 || manifest.Skills[0].Name != "zebra" {
+		t.Fatalf("remaining skills = %v, want only zebra", manifest.Skills)
 	}
 }
 

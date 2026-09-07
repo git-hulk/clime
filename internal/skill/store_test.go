@@ -2,6 +2,7 @@ package skill
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,58 @@ func TestSnapshotLocalSource(t *testing.T) {
 	}
 	if snap.Version != "" {
 		t.Fatalf("Snapshot().Version = %q, want empty for a local path", snap.Version)
+	}
+}
+
+func TestSnapshotReportsFetchProgressAndKeepsCacheHitsSilent(t *testing.T) {
+	remote := createTestGitRepo(t, "skills/test-skill", map[string]string{"SKILL.md": "# Skill"})
+	gitIn(t, remote, "tag", "v1.0.0")
+	sha := gitIn(t, remote, "rev-parse", "HEAD")
+	for _, version := range []string{"v1.0.0", sha} {
+		t.Run(version, func(t *testing.T) {
+			st := newTestStore(t)
+			var messages []string
+			st.Progress = func(message string) { messages = append(messages, message) }
+			src := Source{Repo: "file://" + remote, Query: version}
+			if _, err := st.Snapshot(src); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(messages, "\n"), "Counting objects: 100%") {
+				t.Fatalf("expected Git transfer progress, got %v", messages)
+			}
+			messages = nil
+			if _, err := st.Snapshot(src); err != nil {
+				t.Fatal(err)
+			}
+			if len(messages) != 0 {
+				t.Fatalf("cache hit must not report a transfer: %v", messages)
+			}
+			_, err := st.Snapshot(src.WithQuery(strings.Repeat("f", 40)))
+			if err == nil || !strings.Contains(err.Error(), "fatal:") {
+				t.Fatalf("failed fetch must retain Git diagnostics: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitProgressStreamsPartialLines(t *testing.T) {
+	var messages []string
+	p := &gitProgress{report: func(message string) { messages = append(messages, message) }}
+	p.Write([]byte("Receiving obj"))
+	if len(messages) != 0 {
+		t.Fatal("partial line must wait for a delimiter")
+	}
+	p.Write([]byte("ects: 50%\r\nReceiving objects: 100%\r"))
+	if got := strings.Join(messages, "\n"); got != "Receiving objects: 50%\nReceiving objects: 100%" {
+		t.Fatalf("progress must arrive before the command finishes: %q", got)
+	}
+	p.Write([]byte("last message"))
+	p.flush()
+	if len(messages) != 3 || messages[2] != "last message" {
+		t.Fatalf("unterminated final message was lost: %v", messages)
+	}
+	if got := p.output.String(); got != "Receiving objects: 50%\r\nReceiving objects: 100%\rlast message" {
+		t.Fatalf("captured diagnostics changed: %q", got)
 	}
 }
 
@@ -133,11 +186,12 @@ func TestCloneAtVersion(t *testing.T) {
 	}
 	gitIn(t, remote, "add", "-A")
 	gitIn(t, remote, "commit", "-m", "second")
+	headSHA := gitIn(t, remote, "rev-parse", "HEAD")
 	gitIn(t, remote, "config", "uploadpack.allowAnySHA1InWant", "true")
 
 	t.Run("tag", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "clone")
-		if err := cloneAtVersion(src, "v1.0.0", dir); err != nil {
+		if err := cloneAtVersion(src, "v1.0.0", dir, nil); err != nil {
 			t.Fatalf("cloneAtVersion() error = %v", err)
 		}
 		if got := checkoutVersion(t, dir); got != "v1.0.0" {
@@ -150,21 +204,31 @@ func TestCloneAtVersion(t *testing.T) {
 
 	t.Run("commit SHA", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "clone")
-		if err := cloneAtVersion(src, taggedSHA, dir); err != nil {
+		if err := cloneAtVersion(src, taggedSHA, dir, nil); err != nil {
 			t.Fatalf("cloneAtVersion() error = %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "later.txt")); err == nil {
 			t.Fatal("file from a later commit should not exist in the pinned checkout")
 		}
+		if got := gitIn(t, dir, "rev-parse", "HEAD"); got != taggedSHA {
+			t.Fatalf("checkout = %q, want %q", got, taggedSHA)
+		}
+		cmd := exec.Command("git", "cat-file", "-e", headSHA)
+		cmd.Dir = dir
+		if err := cmd.Run(); err == nil {
+			t.Fatal("fetching a pinned commit must not download the unrelated default branch HEAD")
+		}
 	})
 
 	t.Run("unknown version", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "clone")
-		if err := cloneAtVersion(src, "v9.9.9", dir); err == nil {
-			t.Fatal("cloneAtVersion() should fail for an unknown version")
-		}
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatal("failed clone should not leave a cache directory behind")
+		for _, version := range []string{"v9.9.9", strings.Repeat("a", 40)} {
+			dir := filepath.Join(t.TempDir(), "clone")
+			if err := cloneAtVersion(src, version, dir, nil); err == nil {
+				t.Fatalf("cloneAtVersion(%q) should fail for an unknown version", version)
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("failed clone of %q should not leave a cache directory behind", version)
+			}
 		}
 	})
 }

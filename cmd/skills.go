@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
@@ -99,6 +100,9 @@ var skillsListCmd = &cobra.Command{
 			record, _ := manifest.GetSource(skill.Source{Repo: s.Source})
 			rows = append(rows, []string{s.Name, s.Source, skill.DisplayVersion(record.Version)})
 		}
+		slices.SortStableFunc(rows, func(a, b []string) int {
+			return strings.Compare(a[0], b[0])
+		})
 		if !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
 			printTable(headers, rows)
 			return nil
@@ -296,11 +300,17 @@ func newSkillsManager(manifest *skill.Manifest) (*skill.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	ui := &skillsUI{}
+	store.Progress = func(message string) {
+		if ui.spinner != nil {
+			fetchProgress(ui.spinner)(message)
+		}
+	}
 	return &skill.Manager{
 		Manifest: manifest,
 		Store:    store,
 		Targets:  targets,
-		Events:   &skillsUI{},
+		Events:   ui,
 	}, nil
 }
 
@@ -310,6 +320,15 @@ func startSpinner(msg string) *uicli.Spinner {
 		WithColor(uicli.CyanColor).
 		WithMessage(msg).
 		Start()
+}
+
+func fetchProgress(spinner *uicli.Spinner) func(string) {
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		return spinner.UpdateMessage
+	}
+	return func(message string) {
+		fmt.Fprintln(os.Stderr, message)
+	}
 }
 
 // finish ends the active spinner with fn, tolerating events that arrive
@@ -577,6 +596,9 @@ func selectInstallCandidates(repoSkills []skill.Entry, manifest *skill.Manifest,
 		}
 		candidates = append(candidates, installCandidate{entry: s, label: label})
 	}
+	slices.SortStableFunc(candidates, func(a, b installCandidate) int {
+		return strings.Compare(a.entry.Name, b.entry.Name)
+	})
 	return candidates
 }
 
@@ -595,6 +617,7 @@ func installFromRepo(manifest *skill.Manifest, source string, force bool) error 
 	}
 
 	spinner := startSpinner(fmt.Sprintf("Fetching skills from %q...", source))
+	mgr.Store.Progress = fetchProgress(spinner)
 	snap, catalog, err := mgr.Fetch(src)
 	if err != nil {
 		spinner.Error(fmt.Sprintf("Failed to fetch %q", source))
@@ -680,6 +703,7 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 	for i, s := range manifest.Skills {
 		options[i] = s.Name
 	}
+	slices.Sort(options)
 
 	showSpacer := true
 	for {
@@ -708,7 +732,7 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 		// Collect names before uninstalling, since uninstallByName modifies manifest.Skills.
 		names := make([]string, len(selectedIdxs))
 		for i, idx := range selectedIdxs {
-			names[i] = manifest.Skills[idx].Name
+			names[i] = options[idx]
 		}
 
 		fmt.Println()
