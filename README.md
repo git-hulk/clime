@@ -121,7 +121,23 @@ and Done. In the picker, up/down moves between skills, and selections are kept
 across pages. The numbered picker
 supports `n` and `p` for navigation. Piping `clime skills list` prints every skill.
 
-The manifest at `~/.clime/skills.yaml` records each source's locked version.
+The manifest at `~/.clime/skills.yaml` groups selected skills by source, with one
+locked version per source:
+
+```yaml
+AfterShip/Skills:
+  skills:
+    - rest-api-design
+    - test-abc
+  version: f8c4c0e02021b0debef257750d4d020e9dad38aa
+```
+
+Each selected skill must live at `skills/<name>/SKILL.md` in its source repository.
+Install, update, and sync derive this path from the skill name; catalog path fields
+are not used for installation, and paths are not stored in the manifest.
+Tracked sources without selected skills use `skills: []`; local sources omit
+`version`.
+
 Use `--manifest <path>` with any `clime skills` command to read and save a different
 installed-skills manifest:
 

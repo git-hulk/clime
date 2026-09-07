@@ -66,7 +66,7 @@ Validation failure aborts the entire operation before any download, installation
 
 At the locked snapshot, clime will retain the existing catalog precedence: root `skills.yaml` or `skills.yml`, then `.claude-plugin/marketplace.json`, then `.claude-plugin/plugin.json`. This keeps compatibility with current clime behavior without requiring repositories to publish a new clime-specific file.
 
-The catalog maps a selected skill name to a relative path within the snapshot. The consumer manifest will not persist `path` or `description`; both are derived from a particular repository version, and persisting them would create a second source of truth that may disagree with the catalog.
+Every selected skill is read from `skills/<name>/SKILL.md` within the snapshot. The consumer manifest stores only skill names and the source version; it does not persist `path` or `description`. Catalogs provide discovery metadata, but cannot override the installation path.
 
 ### 3. Version resolution and private access
 
@@ -135,23 +135,19 @@ The first version will not support local directories. `clime skills install /loc
 
 ### 8. Data migration
 
-On first read, clime will recognize the legacy top-level `skills` and `sources` fields. The migrator groups old skills by canonical remote repository and reads the current `HEAD` from the corresponding `~/.clime/sources/<repo>` checkout. It stores that full commit SHA as the new `version`. Migration will not run `git pull` because the remote's current HEAD cannot prove which content was installed locally.
-
-Before replacement, clime saves the original file as `skills.yaml.bak`. It replaces the old file by rename only after validating the migrated manifest, cached content, catalogs, and conflicts. If any legacy entry is a local directory, its cache is missing, its HEAD cannot be resolved, or migration creates a name conflict, migration aborts as a whole. The legacy manifest and agent targets remain unchanged, and the error directs the user to move local content to a Git repository or resolve the reported conflict.
-
-Migration will not delete the legacy mutable cache. A successful migration creates a new immutable cache entry for the detected commit; a later `clime skills purge` can remove unreferenced legacy cache data.
+There are no existing users to migrate. Only the repository-keyed manifest is supported; the legacy reader and backup migration are removed.
 
 ### 9. Compatibility and rollback
 
 | Surface | Impact and mitigation |
 | --- | --- |
-| Legacy `skills.yaml` | The first read migrates it automatically and creates `skills.yaml.bak` before replacement. A failed migration continues to use the old file. |
-| Previous clime binary | Previous versions cannot parse the repository-keyed manifest. Rolling back the binary requires restoring `skills.yaml.bak` in the same operation. |
+| Legacy `skills.yaml` | Unsupported; no migration is provided. |
+| Previous clime binary | Previous versions cannot parse the repository-keyed manifest. |
 | Local-directory installation | The new version rejects this input. Users who still need it must remain on the previous clime version until they publish the skill in Git. |
 | Installed agent targets | The first reconcile replaces complete directories through staging and backup, removing files deleted upstream. Failure restores the original directories. |
 | Tag versions | Existing machines continue using their immutable local cache; a new machine trusts the tag's current upstream target. Use a full commit SHA when cross-machine identity must be strict. |
 
-Migration alone does not modify installed skill content, so release rollback can restore the previous binary and `skills.yaml.bak`. After the user performs an install or update with the new version, the legacy backup no longer represents current desired state. In that case, rollback means selecting the previous repository version in the new manifest and running `sync`, not letting an old binary overwrite the new state.
+To restore an earlier skill version, select that repository version in the manifest and run `sync`.
 
 ### 10. Test plan
 
@@ -168,12 +164,12 @@ Migration alone does not modify installed skill content, so release rollback can
 | An update silently removes a selected skill | Integration | When the new catalog lacks one selected skill, update fails and keeps the old manifest, cache reference, and targets. |
 | Multi-target apply leaves partial state | Integration | Inject failure during the second target replacement and during manifest rename; every changed target restores from backup and the manifest retains its original content. |
 | Backup restoration failure is hidden | Integration | Inject both apply and restore failures; the returned error marks partial state and includes paths to backups that still exist. |
-| Legacy state is migrated incorrectly | Integration | Remote legacy entries merge using cached HEAD; a local entry, missing cache, or post-migration name collision aborts migration and leaves the legacy manifest and targets unchanged. |
+| Manifest shape or derived paths regress | Unit + integration | Source groups round-trip with skill names and versions; offline sync reads `skills/<name>` from the locked snapshot. |
 | Directory replacement leaves stale files | Integration | A file present only in the old version is absent after update and every new file exists; an injected failure restores the complete old directory. |
 
 ### 11. Release verification
 
-Before release, run the candidate binary in an isolated HOME through end-to-end scenarios for a public repository, an authorized private repository, legacy migration, offline sync, and injected rollback. Any manifest/target inconsistency, credential disclosure, or backup-restoration failure stops the release and rejects the candidate binary. clime is a local CLI, so the first version will not add remote telemetry; diagnostics consist of the command phase, canonical repository, version, and sanitized failure reason.
+Before release, run the candidate binary in an isolated HOME through end-to-end scenarios for a public repository, an authorized private repository, manifest round trips, offline sync, and injected rollback. Any manifest/target inconsistency, credential disclosure, or backup-restoration failure stops the release and rejects the candidate binary. clime is a local CLI, so the first version will not add remote telemetry; diagnostics consist of the command phase, canonical repository, version, and sanitized failure reason.
 
 ## Drawbacks
 
@@ -182,7 +178,7 @@ Before release, run the candidate binary in an isolated HOME through end-to-end 
 - Transactions retain staging content and backups for every affected target, requiring temporary disk space close to the combined old and new skill content.
 - The global manifest and global agent targets cannot select different skill sets per project.
 - Removing local-directory installation means skill authors must commit content to a Git repository before exercising the complete installation flow.
-- Previous binaries cannot read the new manifest, so binary rollback also requires restoring the legacy manifest backup.
+- Previous binaries cannot read the new manifest.
 
 ## Alternatives
 

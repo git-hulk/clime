@@ -19,10 +19,10 @@ func TestInstallFromPluginSkillsUsesLockedCacheOffline(t *testing.T) {
 	t.Setenv("PATH", binDir)
 	require.NoError(t, os.WriteFile(filepath.Join(binDir, "clime-cached"), []byte("#!/bin/sh\necho owner/repo\n"), 0o755))
 	cache := filepath.Join(home, ".clime", "sources", "owner", "repo@v1.0.0")
-	require.NoError(t, os.MkdirAll(filepath.Join(cache, "alpha"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(cache, "skills", "alpha"), 0o755))
 	for path, content := range map[string]string{
-		"skills.yaml":    "skills:\n  - name: beta\n    path: beta\n  - name: alpha\n    path: alpha\n",
-		"alpha/SKILL.md": "# cached alpha",
+		"skills.yaml":           "skills:\n  - name: beta\n    path: skills/beta\n  - name: alpha\n    path: skills/alpha\n",
+		"skills/alpha/SKILL.md": "# cached alpha",
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(cache, path), []byte(content), 0o644))
 	}

@@ -71,7 +71,7 @@ func TestManagerInstallEndToEnd(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "skills.yaml"), `skills:
   - name: alpha
     description: Alpha skill
-    path: skills/alpha
+    path: old/alpha
 `)
 	writeFile(t, filepath.Join(repoDir, "skills", "alpha", "SKILL.md"), "# Alpha")
 	writeFile(t, filepath.Join(repoDir, "skills", "alpha", "extra.txt"), "extra")
@@ -102,7 +102,6 @@ func TestManagerInstallEndToEnd(t *testing.T) {
 	installed, ok := mgr.Manifest.GetSkill("alpha")
 	require.True(t, ok)
 	require.Equal(t, repoDir, installed.Source)
-	require.Equal(t, "skills/alpha", installed.Path)
 
 	record, ok := mgr.Manifest.GetSource(src)
 	if ok {
@@ -236,7 +235,7 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 	remote.release("v1.0.0", map[string]string{"test-skill": "# v1"})
 
 	manifest := &Manifest{
-		Skills:  []InstalledSkill{{Name: "test-skill", Source: remote.URL, Path: "skills/test-skill"}},
+		Skills:  []InstalledSkill{{Name: "test-skill", Source: remote.URL}},
 		Sources: []SourceRecord{{Repo: remote.URL, Version: "v1.0.0"}},
 	}
 	mgr, home := newTestManager(t, manifest)
@@ -291,8 +290,8 @@ func TestUpdateRefusesWhenCatalogDropsInstalledSkill(t *testing.T) {
 
 	manifest := &Manifest{
 		Skills: []InstalledSkill{
-			{Name: "alpha", Source: remote.URL, Path: "skills/alpha"},
-			{Name: "beta", Source: remote.URL, Path: "skills/beta"},
+			{Name: "alpha", Source: remote.URL},
+			{Name: "beta", Source: remote.URL},
 		},
 		Sources: []SourceRecord{{Repo: remote.URL, Version: "v1.0.0"}},
 	}
@@ -327,7 +326,7 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 					remote.release("v1.0.0", map[string]string{"alpha": "# v1"})
 					src := Source{Repo: remote.URL}
 					manifest := &Manifest{
-						Skills:  []InstalledSkill{{Name: "alpha", Source: src.Repo, Path: "skills/alpha"}},
+						Skills:  []InstalledSkill{{Name: "alpha", Source: src.Repo}},
 						Sources: []SourceRecord{{Repo: src.Repo, Version: "v1.0.0"}},
 					}
 					mgr, home := newTestManager(t, manifest)
@@ -409,7 +408,7 @@ func TestSyncBackfillsMissingSourceVersion(t *testing.T) {
 
 	// A manifest from before versions were tracked: no source record.
 	manifest := &Manifest{
-		Skills: []InstalledSkill{{Name: "test-skill", Source: remote.URL, Path: "skills/test-skill"}},
+		Skills: []InstalledSkill{{Name: "test-skill", Source: remote.URL}},
 	}
 	mgr, home := newTestManager(t, manifest)
 	src := Source{Repo: remote.URL}
@@ -422,4 +421,34 @@ func TestSyncBackfillsMissingSourceVersion(t *testing.T) {
 	record, ok := manifest.GetSource(src)
 	require.True(t, ok)
 	require.Equal(t, "v1.0.0", record.Version)
+}
+
+func TestSyncUsesGroupedManifestAndConventionalPathsOffline(t *testing.T) {
+	manager, home := newTestManager(t, &Manifest{})
+	path := filepath.Join(home, ".clime", "skills.yaml")
+	writeFile(t, path, `AfterShip/Skills:
+  skills:
+    - rest-api-design
+    - test-abc
+  version: f8c4c0e02021b0debef257750d4d020e9dad38aa
+`)
+	manifest, err := LoadManifest(path)
+	require.NoError(t, err)
+	manager.Manifest = manifest
+	source := Source{Repo: "AfterShip/Skills"}
+	cache := versionDir(manager.Store.repoDir(source), "f8c4c0e02021b0debef257750d4d020e9dad38aa")
+	for _, name := range []string{"rest-api-design", "test-abc"} {
+		writeFile(t, filepath.Join(cache, "skills", name, "SKILL.md"), "# "+name)
+	}
+	t.Setenv("PATH", t.TempDir())
+	count, err := manager.Sync(source)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+	for _, name := range []string{"rest-api-design", "test-abc"} {
+		require.Equal(t, "# "+name, readInstalledSkill(t, home, name))
+	}
+	reloaded, err := LoadManifest(path)
+	require.NoError(t, err)
+	require.Equal(t, manifest.Skills, reloaded.Skills)
+	require.Equal(t, manifest.Sources, reloaded.Sources)
 }

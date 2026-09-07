@@ -214,3 +214,11 @@ func readSkillFrontmatter(path string) (*skillFrontmatter, error) {
 	}
 	return parseSkillFrontmatter(data)
 }
+
+// validateSkillName keeps derived skill paths within a single directory.
+func validateSkillName(name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid skill name %q: expected a directory name", name)
+	}
+	return nil
+}

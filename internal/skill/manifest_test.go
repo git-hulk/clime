@@ -81,89 +81,68 @@ func writeManifestFile(t *testing.T, home, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "skills.yaml"), []byte(content), 0o644))
 }
 
-func TestLoadManifestNormalizesVersionedSources(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	writeManifestFile(t, home, `skills:
-  - name: pinned-skill
-    source: owner/repo@v1.2.3
-    path: skills/pinned-skill
-  - name: legacy-skill
-    source: owner/repo@latest
-    version: v1.4.0
-    path: skills/legacy-skill
-sources:
-  - owner/repo
-  - owner/repo@latest
-  - owner/repo@v1.2.3
-`)
-
-	m, err := LoadManifest("")
-	require.NoError(t, err)
-
-	require.Len(t, m.Sources, 1)
-	require.Equal(t, "owner/repo", m.Sources[0].Repo)
-	require.Equal(t, "v1.2.3", m.Sources[0].Version)
-
-	for _, name := range []string{"pinned-skill", "legacy-skill"} {
-		s, _ := m.GetSkill(name)
-		require.Equal(t, "owner/repo", s.Source)
-		require.Empty(t, s.LegacyVersion)
-	}
-}
-
-func TestLoadManifestListsSkillSources(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	writeManifestFile(t, home, `skills:
-  - name: old-skill
-    source: owner/repo
-    path: skills/old-skill
-  - name: sibling-skill
-    source: Owner/Repo
-    path: skills/sibling-skill
-`)
-
-	m, err := LoadManifest("")
-	require.NoError(t, err)
-	require.Len(t, m.Sources, 1)
-
-	record, ok := m.GetSource(Source{Repo: "owner/repo"})
-	require.True(t, ok)
-	require.Empty(t, record.Version)
-}
-
-func TestLoadManifestBacksUpMigratedFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	legacy := `skills:
-  - name: old-skill
-    source: owner/repo@v1.2.3
-    path: skills/old-skill
-sources:
-  - owner/repo
+func TestManifestGroupsSkillsBySource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skills.yaml")
+	content := `AfterShip/Skills:
+    skills:
+        - rest-api-design
+        - test-abc
+    version: f8c4c0e02021b0debef257750d4d020e9dad38aa
+other/repo:
+    skills:
+        - other-skill
+    version: v1.2.3
+tracked/only:
+    skills: []
 `
-	writeManifestFile(t, home, legacy)
-
-	_, err := LoadManifest("")
+	writeFile(t, path, content)
+	manifest, err := LoadManifest(path)
 	require.NoError(t, err)
-
-	backup := filepath.Join(home, ".clime", "skills.yaml.bak")
-	got, err := os.ReadFile(backup)
+	require.Len(t, manifest.Sources, 3)
+	require.Equal(t, []InstalledSkill{
+		{Name: "rest-api-design", Source: "AfterShip/Skills"},
+		{Name: "test-abc", Source: "AfterShip/Skills"},
+		{Name: "other-skill", Source: "other/repo"},
+	}, manifest.Skills)
+	record, found := manifest.GetSource(Source{Repo: "aftership/skills"})
+	require.True(t, found)
+	require.Equal(t, "f8c4c0e02021b0debef257750d4d020e9dad38aa", record.Version)
+	require.NoError(t, manifest.Save())
+	written, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, legacy, string(got))
+	require.Equal(t, content, string(written))
 
-	// A later migrating load keeps the original backup rather than
-	// replacing it with already-migrated content.
-	writeManifestFile(t, home, "skills:\n  - name: other\n    source: Owner/Repo@v2\n    path: skills/other\n")
-
-	_, err = LoadManifest("")
+	manifest.RemoveSkill("test-abc")
+	manifest.AddSkill(InstalledSkill{Name: "new-skill", Source: "AfterShip/Skills"})
+	manifest.SetSourceVersion(Source{Repo: "aftership/skills"}, "v2.0.0")
+	require.NoError(t, manifest.Save())
+	reloaded, err := LoadManifest(path)
 	require.NoError(t, err)
+	require.Equal(t, manifest.SkillsFrom(Source{Repo: "AfterShip/Skills"}), reloaded.SkillsFrom(Source{Repo: "AfterShip/Skills"}))
+	record, found = reloaded.GetSource(Source{Repo: "AfterShip/Skills"})
+	require.True(t, found)
+	require.Equal(t, "v2.0.0", record.Version)
+}
 
-	got, err = os.ReadFile(backup)
-	require.NoError(t, err)
-	require.Equal(t, legacy, string(got))
+func TestManifestRejectsInvalidSourceGroups(t *testing.T) {
+	for _, content := range []string{
+		"skills: []\nsources: []\n",
+		"owner/repo: {skills: [alpha]}\nowner/repo: {skills: [beta]}\n",
+		"owner/repo: {skills: []}\nOwner/Repo: {skills: []}\n",
+		"owner/repo: {skills: [alpha, alpha]}\n",
+		"owner/repo: {skills: [alpha]}\nother/repo: {skills: [alpha]}\n",
+		"owner/repo: {skills: [../alpha]}\n",
+	} {
+		t.Run(content, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "skills.yaml")
+			writeFile(t, path, content)
+			_, err := LoadManifest(path)
+			require.ErrorContains(t, err, "failed to parse "+path)
+			unchanged, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, content, string(unchanged))
+		})
+	}
 }
 
 func TestLoadManifestParseErrorNamesFile(t *testing.T) {
@@ -176,13 +155,13 @@ func TestLoadManifestParseErrorNamesFile(t *testing.T) {
 }
 
 func TestCustomManifestPersistsToSelectedPath(t *testing.T) {
-	for _, initial := range []string{"", "skills: []\n", "sources:\n  - owner/repo@v1.2.3\n"} {
+	for _, initial := range []string{"", "{}\n", "owner/repo:\n  skills: []\n  version: v1.2.3\n"} {
 		t.Run(initial, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			t.Chdir(t.TempDir())
 			defaultPath := filepath.Join(home, ".clime", "skills.yaml")
-			defaultContent := "skills: []\nsources: []\n"
+			defaultContent := "{}\n"
 			writeFile(t, defaultPath, defaultContent)
 			path := filepath.Join("config", "skills.yaml")
 			if initial != "" {
@@ -191,21 +170,13 @@ func TestCustomManifestPersistsToSelectedPath(t *testing.T) {
 
 			manifest, err := LoadManifest(path)
 			require.NoError(t, err)
-			if initial == "sources:\n  - owner/repo@v1.2.3\n" {
-				backup, err := os.ReadFile(path + ".bak")
-				require.NoError(t, err)
-				require.Equal(t, initial, string(backup))
-				migrated, err := os.ReadFile(path)
-				require.NoError(t, err)
-				require.Contains(t, string(migrated), "version: v1.2.3")
-			}
-			manifest.AddSkill(InstalledSkill{Name: "custom", Source: "owner/repo", Path: "skills/custom"})
+			manifest.AddSkill(InstalledSkill{Name: "custom", Source: "owner/repo"})
 			require.NoError(t, manifest.Save())
 			reloaded, err := LoadManifest(path)
 			require.NoError(t, err)
 			installed, found := reloaded.GetSkill("custom")
 			require.True(t, found)
-			require.Equal(t, "skills/custom", installed.Path)
+			require.Equal(t, "owner/repo", installed.Source)
 			unchanged, err := os.ReadFile(defaultPath)
 			require.NoError(t, err)
 			require.Equal(t, defaultContent, string(unchanged))

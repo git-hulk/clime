@@ -119,7 +119,7 @@ func TestSkillsListAndUninstallWithCustomManifest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skills.yaml")
 	manifest, err := skill.LoadManifest(path)
 	require.NoError(t, err)
-	manifest.AddSkill(skill.InstalledSkill{Name: "custom-skill", Source: "owner/repo", Path: "skills/custom-skill"})
+	manifest.AddSkill(skill.InstalledSkill{Name: "custom-skill", Source: "owner/repo"})
 	manifest.SetSourceVersion(skill.Source{Repo: "owner/repo"}, "v1.2.3")
 	require.NoError(t, manifest.Save())
 	t.Cleanup(func() {

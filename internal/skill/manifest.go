@@ -12,30 +12,30 @@ import (
 
 // InstalledSkill tracks a skill that has been installed locally.
 type InstalledSkill struct {
-	Name   string `yaml:"name"`
-	Source string `yaml:"source"`
-	// LegacyVersion carries the per-skill version that older manifests
-	// recorded. The version belongs to the source repository; the legacy
-	// migration moves this value there and clears it, so it is never
-	// written back.
-	LegacyVersion string `yaml:"version,omitempty"`
-	Path          string `yaml:"path"`
+	Name   string
+	Source string
 }
 
 // SourceRecord tracks a known skill source repository and the version its
 // installed skills come from.
 type SourceRecord struct {
-	Repo    string `yaml:"repo"`
-	Version string `yaml:"version,omitempty"`
+	Repo    string
+	Version string
 }
 
 // Manifest is the persistent record of which skills
 // are installed, from which sources, and the concrete version each source
 // is pinned to. Versions live on sources, never on skills.
 type Manifest struct {
-	Skills  []InstalledSkill `yaml:"skills"`
-	Sources []SourceRecord   `yaml:"sources,omitempty"`
+	Skills  []InstalledSkill
+	Sources []SourceRecord
 	path    string
+}
+
+// manifestSource is the YAML value under a repository key.
+type manifestSource struct {
+	Skills  []string `yaml:"skills"`
+	Version string   `yaml:"version,omitempty"`
 }
 
 func manifestPath() (string, error) {
@@ -68,9 +68,36 @@ func LoadManifest(path string) (*Manifest, error) {
 		}
 		return nil, err
 	}
-	manifest, err := parseManifest(path, data)
-	if err != nil {
-		return nil, err
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	manifest := &Manifest{path: path}
+	if len(document.Content) == 0 {
+		return manifest, nil
+	}
+	var sources map[string]manifestSource
+	if err := document.Decode(&sources); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	// Walk the keys in document order, retaining their original spelling.
+	for index := 0; index < len(document.Content[0].Content); index += 2 {
+		repo := document.Content[0].Content[index].Value
+		source := Source{Repo: repo}
+		if repo == "" || manifest.sourceIndex(repo) >= 0 {
+			return nil, fmt.Errorf("failed to parse %s: empty or duplicate source %q", path, repo)
+		}
+		record := sources[repo]
+		manifest.SetSourceVersion(source, record.Version)
+		for _, name := range record.Skills {
+			if err := validateSkillName(name); err != nil {
+				return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+			}
+			if _, found := manifest.GetSkill(name); found {
+				return nil, fmt.Errorf("failed to parse %s: duplicate skill %q", path, name)
+			}
+			manifest.AddSkill(InstalledSkill{Name: name, Source: repo})
+		}
 	}
 	return manifest, nil
 }
@@ -89,7 +116,23 @@ func (manifest *Manifest) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(manifest)
+	document := &yaml.Node{Kind: yaml.MappingNode}
+	for _, source := range manifest.KnownSources() {
+		record, found := manifest.GetSource(source)
+		if found {
+			source.Repo = record.Repo
+		}
+		group := manifestSource{Skills: []string{}, Version: record.Version}
+		for _, installedSkill := range manifest.SkillsFrom(source) {
+			group.Skills = append(group.Skills, installedSkill.Name)
+		}
+		var value yaml.Node
+		if err := value.Encode(group); err != nil {
+			return err
+		}
+		document.Content = append(document.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: source.Repo}, &value)
+	}
+	data, err := yaml.Marshal(document)
 	if err != nil {
 		return err
 	}

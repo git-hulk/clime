@@ -2,6 +2,7 @@ package skill
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -175,7 +176,7 @@ func (manager *Manager) Update(source Source) (int, error) {
 }
 
 // Sync re-installs a source's skills at the version locked in the
-// manifest, using the stored skill paths, and returns how many skills it
+// manifest, using skills/<name> paths, and returns how many skills it
 // re-installed. A source without a locked version is installed at latest
 // and the resolved version is recorded. After successful installation,
 // other cached versions of the source are removed.
@@ -201,7 +202,7 @@ func (manager *Manager) Sync(source Source) (int, error) {
 
 	entries := make([]Entry, 0, len(installed))
 	for _, installedSkill := range installed {
-		entries = append(entries, Entry{Name: installedSkill.Name, Path: installedSkill.Path})
+		entries = append(entries, Entry{Name: installedSkill.Name})
 	}
 	return manager.install(VerbSync, snapshot, entries)
 }
@@ -260,7 +261,10 @@ func (manager *Manager) installEntry(verb Verb, snapshot *Snapshot, entry Entry)
 	events := manager.events()
 	events.SkillInstalling(verb, entry.Name, snapshot.Source)
 
-	files, err := snapshot.SkillFiles(entry.Path)
+	if err := validateSkillName(entry.Name); err != nil {
+		return err
+	}
+	files, err := snapshot.SkillFiles(filepath.Join("skills", entry.Name))
 	if err != nil {
 		return fmt.Errorf("failed to %s skill %q: %w", verb, entry.Name, err)
 	}
@@ -286,7 +290,6 @@ func (manager *Manager) installEntry(verb Verb, snapshot *Snapshot, entry Entry)
 	manager.Manifest.AddSkill(InstalledSkill{
 		Name:   entry.Name,
 		Source: snapshot.Source.Repo,
-		Path:   entry.Path,
 	})
 	if err := manager.Manifest.Save(); err != nil {
 		return fmt.Errorf("skill installed but failed to update manifest: %w", err)
