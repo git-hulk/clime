@@ -10,6 +10,7 @@ import (
 	"github.com/git-hulk/clime/internal/prompt"
 	"github.com/git-hulk/clime/internal/skill"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type sourceAction int
@@ -21,6 +22,8 @@ const (
 )
 
 const newRepoOption = "Enter a new repository..."
+
+const skillsPageSize = 10
 
 var (
 	selectPrompt       = prompt.Select
@@ -70,6 +73,8 @@ var skillsCmd = &cobra.Command{
 var skillsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List installed skills and their sources",
+	Long: "List installed skills and their sources, 10 per page in an interactive " +
+		"terminal. Piped output includes every skill.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := skill.LoadManifest()
 		if err != nil {
@@ -94,10 +99,51 @@ var skillsListCmd = &cobra.Command{
 			record, _ := manifest.GetSource(skill.Source{Repo: s.Source})
 			rows = append(rows, []string{s.Name, s.Source, skill.DisplayVersion(record.Version)})
 		}
-		printTable(headers, rows)
-
-		return nil
+		if !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
+			printTable(headers, rows)
+			return nil
+		}
+		return printSkillPages(headers, rows)
 	},
+}
+
+func printSkillPages(headers []string, rows [][]string) error {
+	for start := 0; ; {
+		end := min(start+skillsPageSize, len(rows))
+		printTable(headers, rows[start:end])
+		if len(rows) <= skillsPageSize {
+			return nil
+		}
+		options := []string{}
+		if end < len(rows) {
+			options = append(options, "Next page")
+		}
+		if start > 0 {
+			options = append(options, "Previous page")
+		}
+		options = append(options, "Done")
+		idx, err := selectPrompt(prompt.SelectConfig{
+			Label:       fmt.Sprintf("Page %d/%d", start/skillsPageSize+1, (len(rows)-1)/skillsPageSize+1),
+			Options:     options,
+			LeftOption:  "Previous page",
+			RightOption: "Next page",
+		})
+		if errors.Is(err, prompt.ErrBack) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		switch options[idx] {
+		case "Next page":
+			start = end
+		case "Previous page":
+			start -= skillsPageSize
+		default:
+			return nil
+		}
+		fmt.Println()
+	}
 }
 
 func printTable(headers []string, rows [][]string) {
@@ -579,8 +625,9 @@ func installFromRepo(manifest *skill.Manifest, source string, force bool) error 
 
 	fmt.Println()
 	selectedIdxs, err := multiSelectPrompt(prompt.SelectConfig{
-		Label:   "Select skills to install (space to toggle, enter to confirm)",
-		Options: options,
+		Label:    "Select skills to install (space to toggle, enter to confirm)",
+		Options:  options,
+		PageSize: skillsPageSize,
 	})
 	if err != nil {
 		return err

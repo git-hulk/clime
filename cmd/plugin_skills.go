@@ -164,8 +164,9 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 
 	fmt.Println()
 	selectedIdxs, err := multiSelectPrompt(prompt.SelectConfig{
-		Label:   "Select skills to install (space to toggle, enter to confirm)",
-		Options: options,
+		Label:    "Select skills to install (space to toggle, enter to confirm)",
+		Options:  options,
+		PageSize: skillsPageSize,
 	})
 	if err != nil {
 		return err

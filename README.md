@@ -110,6 +110,12 @@ clime skills list                       # list installed skills
 clime skills uninstall <name>           # remove a skill
 ```
 
+The installed-skills list and install picker show 10 skills per page. Use the
+left/right arrows to change pages. The list also offers Next page, Previous page,
+and Done. In the picker, up/down moves between skills, and selections are kept
+across pages. The numbered picker
+supports `n` and `p` for navigation. Piping `clime skills list` prints every skill.
+
 The manifest at `~/.clime/skills.yaml` records each source's locked version.
 Installing without a version uses that lock and reuses the local cache without
 network access when available. If the locked version is not cached, it is fetched;

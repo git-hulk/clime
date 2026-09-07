@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -18,6 +19,12 @@ type SelectConfig struct {
 	Label   string
 	Options []string
 	Default int
+	// PageSize limits MultiSelect to this many options per page; zero shows all.
+	PageSize int
+	// LeftOption and RightOption let Select activate a matching option with
+	// the corresponding arrow key. Missing options leave the prompt unchanged.
+	LeftOption  string
+	RightOption string
 }
 
 // ErrCancelled is returned when the user cancels a selection prompt.
@@ -97,6 +104,15 @@ func selectInteractive(config SelectConfig) (int, error) {
 			}
 		} else if n >= 3 && b[0] == 27 && b[1] == 91 {
 			switch b[2] {
+			case 67, 68: // Right, Left
+				option := config.RightOption
+				if b[2] == 68 {
+					option = config.LeftOption
+				}
+				if idx := slices.Index(config.Options, option); option != "" && idx >= 0 {
+					clearLines(len(config.Options) + 2)
+					return idx, nil
+				}
 			case 65: // Up
 				if current > 0 {
 					current--
@@ -118,7 +134,11 @@ func selectInteractive(config SelectConfig) (int, error) {
 
 func displaySelect(config SelectConfig, current int) {
 	fmt.Printf("%s %s%s", uicli.Info.Sprint("?"), config.Label, crlf)
-	fmt.Printf("%s%s", uicli.Muted.Sprint("(↑/↓ navigate, Enter select, Esc back, Ctrl+C exit)"), crlf)
+	hint := "↑/↓ navigate"
+	if config.LeftOption != "" || config.RightOption != "" {
+		hint += ", ←/→ page"
+	}
+	fmt.Printf("%s%s", uicli.Muted.Sprintf("(%s, Enter select, Esc back, Ctrl+C exit)", hint), crlf)
 	for i, option := range config.Options {
 		if i == current {
 			fmt.Printf("  %s %s%s", uicli.Success.Sprint("→"), uicli.BoldColor.Sprint(option), crlf)
@@ -167,6 +187,10 @@ func selectFallback(config SelectConfig) (int, error) {
 func multiSelectInteractive(config SelectConfig) ([]int, error) {
 	current := 0
 	selected := make(map[int]bool)
+	lines := min(len(config.Options), config.pageSize()) + 2
+	if len(config.Options) > config.pageSize() {
+		lines++
+	}
 
 	uicli.HideCursor()
 	defer uicli.ShowCursor()
@@ -189,7 +213,7 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 		if n == 1 {
 			switch b[0] {
 			case 13: // Enter
-				clearLines(len(config.Options) + 2)
+				clearLines(lines)
 				var result []int
 				for i := range config.Options {
 					if selected[i] {
@@ -204,10 +228,10 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 				}
 				return result, nil
 			case 3: // Ctrl+C
-				clearLines(len(config.Options) + 2)
+				clearLines(lines)
 				return nil, ErrInterrupted
 			case 27: // Esc
-				clearLines(len(config.Options) + 2)
+				clearLines(lines)
 				return nil, ErrBack
 			case 32: // Space
 				selected[current] = !selected[current]
@@ -215,6 +239,16 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 			}
 		} else if n >= 3 && b[0] == 27 && b[1] == 91 {
 			switch b[2] {
+			case 67: // Right
+				if next := (current/config.pageSize() + 1) * config.pageSize(); next < len(config.Options) {
+					current = next
+				}
+				refreshMultiSelect(config, current, selected)
+			case 68: // Left
+				if page := current / config.pageSize(); page > 0 {
+					current = (page - 1) * config.pageSize()
+				}
+				refreshMultiSelect(config, current, selected)
 			case 65: // Up
 				if current > 0 {
 					current--
@@ -236,8 +270,15 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 
 func displayMultiSelect(config SelectConfig, current int, selected map[int]bool) {
 	fmt.Printf("%s %s%s", uicli.Info.Sprint("?"), config.Label, crlf)
-	fmt.Printf("%s%s", uicli.Muted.Sprint("(↑/↓ navigate, Space select, Enter confirm, Esc back, Ctrl+C exit)"), crlf)
-	for i, option := range config.Options {
+	hint := "↑/↓ navigate"
+	if len(config.Options) > config.pageSize() {
+		hint += ", ←/→ page"
+	}
+	fmt.Printf("%s%s", uicli.Muted.Sprintf("(%s, Space select, Enter confirm, Esc back, Ctrl+C exit)", hint), crlf)
+	start := current / config.pageSize() * config.pageSize()
+	end := min(start+config.pageSize(), len(config.Options))
+	for i := start; i < end; i++ {
+		option := config.Options[i]
 		marker := "○"
 		if selected[i] {
 			marker = uicli.Success.Sprint("●")
@@ -248,33 +289,59 @@ func displayMultiSelect(config SelectConfig, current int, selected map[int]bool)
 			fmt.Printf("    %s %s%s", marker, option, crlf)
 		}
 	}
+	if len(config.Options) > config.pageSize() {
+		// Keep the rendered height stable when the last page is shorter.
+		for i := end - start; i < config.pageSize(); i++ {
+			fmt.Print(crlf)
+		}
+		fmt.Printf("%s%s", uicli.Muted.Sprintf("Page %d/%d", start/config.pageSize()+1,
+			(len(config.Options)-1)/config.pageSize()+1), crlf)
+	}
 }
 
 func refreshMultiSelect(config SelectConfig, current int, selected map[int]bool) {
-	fmt.Printf("\033[%dA\033[J", len(config.Options)+2)
+	lines := min(len(config.Options), config.pageSize()) + 2
+	if len(config.Options) > config.pageSize() {
+		lines++
+	}
+	clearLines(lines)
 	displayMultiSelect(config, current, selected)
+}
+
+func (config SelectConfig) pageSize() int {
+	if config.PageSize > 0 {
+		return config.PageSize
+	}
+	return max(1, len(config.Options))
 }
 
 // --- multi select (fallback for non-terminal) ---
 
 func multiSelectFallback(config SelectConfig) ([]int, error) {
 	selected := make(map[int]bool)
+	reader := bufio.NewReader(os.Stdin)
+	start := 0
 	for {
 		fmt.Printf("%s %s (toggle by number, Enter to confirm)\n", uicli.Info.Sprint("?"), config.Label)
-		for i, option := range config.Options {
+		end := min(start+config.pageSize(), len(config.Options))
+		for i := start; i < end; i++ {
 			marker := "○"
 			if selected[i] {
 				marker = "●"
 			}
-			fmt.Printf("  %s %d) %s\n", marker, i+1, option)
+			fmt.Printf("  %s %d) %s\n", marker, i+1, config.Options[i])
+		}
+		if len(config.Options) > config.pageSize() {
+			fmt.Printf("Page %d/%d (n next, p previous)\n", start/config.pageSize()+1,
+				(len(config.Options)-1)/config.pageSize()+1)
 		}
 		fmt.Printf("Toggle (1-%d) or Enter to confirm: ", len(config.Options))
 
-		input, err := readLine()
+		line, _, err := reader.ReadLine()
 		if err != nil {
 			return nil, err
 		}
-		input = strings.TrimSpace(input)
+		input := strings.TrimSpace(string(line))
 		if input == "" {
 			var result []int
 			for i := range config.Options {
@@ -283,6 +350,16 @@ func multiSelectFallback(config SelectConfig) ([]int, error) {
 				}
 			}
 			return result, nil
+		}
+		if input == "n" {
+			if end < len(config.Options) {
+				start = end
+			}
+			continue
+		}
+		if input == "p" {
+			start = max(0, start-config.pageSize())
+			continue
 		}
 		sel, err := strconv.Atoi(input)
 		if err != nil || sel < 1 || sel > len(config.Options) {
