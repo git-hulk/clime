@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,7 +191,12 @@ func TestManagerFetchHonorsQueriesAndFetchesMissingVersions(t *testing.T) {
 			mgr, _ := newTestManager(t, manifest)
 			snap, catalog, err := mgr.Fetch(src)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, snap.Version)
+			wantVersion := tt.want
+			if tt.query == "latest" || (tt.query == "" && tt.locked == "") {
+				wantVersion = "latest"
+			}
+			require.Equal(t, wantVersion, snap.Version)
+			require.Equal(t, tt.want, snap.revision)
 
 			_, ok := catalog.Find("alpha")
 			require.True(t, ok, "fetched catalog does not contain alpha")
@@ -262,7 +268,7 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "# v2", readInstalledSkill(t, home, "test-skill"))
-	require.Equal(t, "v2.0.0", sourceVersion())
+	require.Equal(t, "latest", sourceVersion())
 	require.False(t, dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")), "successful update must remove the old snapshot")
 	require.True(t, dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")), "successful update must keep the installed snapshot")
 
@@ -273,7 +279,7 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 
-	require.Equal(t, "v2.0.0", events.upToDate)
+	require.Equal(t, "latest", events.upToDate)
 	mgr.Events = nil
 
 	_, err = mgr.Update(src.WithQuery("v1.0.0"))
@@ -372,7 +378,7 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 					case VerbInstall:
 						_, err = mgr.Install(snap, catalog.Skills)
 					case VerbUpdate:
-						_, err = mgr.Update(src)
+						_, err = mgr.Update(src.WithQuery("v2.0.0"))
 					case VerbSync:
 						_, err = mgr.Sync(src)
 					}
@@ -382,6 +388,13 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 					} else {
 						require.NoError(t, err)
 					}
+					installedRevision, err := mgr.Store.installedRevision(src)
+					require.NoError(t, err)
+					wantRevision := "v1.0.0"
+					if failure == "success" {
+						wantRevision = "v2.0.0"
+					}
+					require.Equal(t, wantRevision, installedRevision)
 					for _, dir := range []string{stale, versionDir(base, "v1.0.0")} {
 						require.Equal(t, failure != "success", dirExists(dir), "snapshot %s", dir)
 					}
@@ -420,7 +433,7 @@ func TestSyncBackfillsMissingSourceVersion(t *testing.T) {
 
 	record, ok := manifest.GetSource(src)
 	require.True(t, ok)
-	require.Equal(t, "v1.0.0", record.Version)
+	require.Equal(t, "latest", record.Version)
 }
 
 func TestSyncUsesGroupedManifestAndConventionalPathsOffline(t *testing.T) {
@@ -451,4 +464,116 @@ func TestSyncUsesGroupedManifestAndConventionalPathsOffline(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, manifest.Skills, reloaded.Skills)
 	require.Equal(t, manifest.Sources, reloaded.Sources)
+}
+
+func TestBranchVersionsStayNamedWhileSyncAndUpdateFollowHead(t *testing.T) {
+	remote := newSkillRemote(t)
+	remote.release("v1.0.0", map[string]string{"alpha": "# first"})
+	gitIn(t, remote.dir, "checkout", "-b", "feature/skills")
+	manager, home := newTestManager(t, &Manifest{})
+	source := Source{Repo: remote.URL, Query: "feature/skills"}
+	snapshot, catalog, err := manager.Fetch(source)
+	require.NoError(t, err)
+	firstRevision := gitIn(t, remote.dir, "rev-parse", "HEAD")
+	require.Equal(t, "feature/skills", snapshot.Version)
+	require.Equal(t, versionDir(manager.Store.repoDir(source), firstRevision), snapshot.Dir)
+	_, err = manager.Install(snapshot, catalog.Skills)
+	require.NoError(t, err)
+
+	for _, operation := range []string{"sync", "update", "explicit update"} {
+		writeFile(t, filepath.Join(remote.dir, "skills", "alpha", "SKILL.md"), "# "+operation)
+		gitIn(t, remote.dir, "add", "-A")
+		gitIn(t, remote.dir, "commit", "-m", operation)
+		// Reload to prove the branch identity survives the YAML round trip.
+		manager.Manifest, err = LoadManifest("")
+		require.NoError(t, err)
+		var count int
+		if operation == "sync" {
+			count, err = manager.Sync(Source{Repo: source.Repo})
+		} else if operation == "update" {
+			count, err = manager.Update(Source{Repo: source.Repo})
+		} else {
+			count, err = manager.Update(source)
+		}
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+		require.Equal(t, "# "+operation, readInstalledSkill(t, home, "alpha"))
+		saved, err := LoadManifest("")
+		require.NoError(t, err)
+		record, found := saved.GetSource(source)
+		require.True(t, found)
+		require.Equal(t, "feature/skills", record.Version)
+		currentRevision := gitIn(t, remote.dir, "rev-parse", "HEAD")
+		require.True(t, dirExists(versionDir(manager.Store.repoDir(source), currentRevision)))
+		require.False(t, dirExists(versionDir(manager.Store.repoDir(source), firstRevision)))
+	}
+}
+
+func TestLatestChecksRemoteForInstallUpdateAndSync(t *testing.T) {
+	for _, tags := range []bool{true, false} {
+		name := "default branch"
+		if tags {
+			name = "release tags"
+		}
+		t.Run(name, func(t *testing.T) {
+			remote := newSkillRemote(t)
+			remote.release("v1.0.0", map[string]string{"alpha": "# first"})
+			if !tags {
+				gitIn(t, remote.dir, "tag", "-d", "v1.0.0")
+			}
+			manager, home := newTestManager(t, &Manifest{})
+			source := Source{Repo: remote.URL}
+			// A cache directory named latest must never bypass remote resolution.
+			writeFile(t, filepath.Join(versionDir(manager.Store.repoDir(source), "latest"), "stale"), "stale")
+			snapshot, catalog, err := manager.Fetch(source)
+			require.NoError(t, err)
+			_, err = manager.Install(snapshot, catalog.Skills)
+			require.NoError(t, err)
+
+			for index, operation := range []string{"install", "update", "sync"} {
+				count, err := manager.Update(source)
+				require.NoError(t, err)
+				require.Zero(t, count, "unchanged remote revision is already installed")
+
+				tag := fmt.Sprintf("v%d.0.0", index+2)
+				remote.release(tag, map[string]string{"alpha": "# " + operation})
+				if !tags {
+					gitIn(t, remote.dir, "tag", "-d", tag)
+				}
+				manager.Manifest, err = LoadManifest("")
+				require.NoError(t, err)
+				// Downloading a revision alone must not mark it as installed.
+				snapshot, catalog, err = manager.Fetch(source)
+				require.NoError(t, err)
+				switch operation {
+				case "install":
+					count, err = manager.Install(snapshot, catalog.Skills)
+				case "update":
+					count, err = manager.Update(source)
+				case "sync":
+					count, err = manager.Sync(source)
+				}
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+				require.Equal(t, "# "+operation, readInstalledSkill(t, home, "alpha"))
+				saved, err := LoadManifest("")
+				require.NoError(t, err)
+				record, found := saved.GetSource(source)
+				require.True(t, found)
+				require.Equal(t, "latest", record.Version)
+				count, err = manager.Update(source)
+				require.NoError(t, err)
+				require.Zero(t, count)
+			}
+
+			// Floating versions still check the remote when content is cached.
+			require.NoError(t, os.Rename(remote.dir, filepath.Join(t.TempDir(), "offline")))
+			_, _, err = manager.Fetch(source)
+			require.Error(t, err)
+			_, err = manager.Update(source)
+			require.Error(t, err)
+			_, err = manager.Sync(source)
+			require.Error(t, err)
+		})
+	}
 }

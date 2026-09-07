@@ -24,8 +24,8 @@ type SourceRecord struct {
 }
 
 // Manifest is the persistent record of which skills
-// are installed, from which sources, and the concrete version each source
-// is pinned to. Versions live on sources, never on skills.
+// are installed, from which sources, and the latest query, tag, branch, or commit each
+// source uses. Versions live on sources, never on skills.
 type Manifest struct {
 	Skills  []InstalledSkill
 	Sources []SourceRecord

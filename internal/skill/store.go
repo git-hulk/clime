@@ -26,9 +26,11 @@ type Store struct {
 type Snapshot struct {
 	Source Source
 	Dir    string
-	// Version is the concrete tag or full commit SHA the directory holds.
+	// Version is latest, a tag, branch name, or full commit SHA saved in the manifest.
 	// Local sources have no version identity, so their version is empty.
 	Version string
+	// revision identifies the immutable cache directory, resolving branches to SHAs.
+	revision string
 }
 
 // OpenStore returns the store rooted at ~/.clime/sources.
@@ -62,8 +64,8 @@ func (store *Store) Snapshot(source Source) (*Snapshot, error) {
 		query = "latest"
 	}
 	base := store.repoDir(source)
-	if dir := versionDir(base, query); dirExists(dir) {
-		return &Snapshot{Source: source, Dir: dir, Version: query}, nil
+	if dir := versionDir(base, query); query != "latest" && dirExists(dir) {
+		return &Snapshot{Source: source, Dir: dir, Version: query, revision: query}, nil
 	}
 	repo := source.githubRepo()
 	if repo != "" {
@@ -72,7 +74,7 @@ func (store *Store) Snapshot(source Source) (*Snapshot, error) {
 			repo = ""
 		}
 	}
-	var resolved string
+	var resolved resolvedVersion
 	var err error
 	if repo != "" {
 		resolved, err = resolveVersion(&githubSource{Source: Source{Repo: repo}}, query)
@@ -82,23 +84,44 @@ func (store *Store) Snapshot(source Source) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := versionDir(base, resolved)
+	dir := versionDir(base, resolved.revision)
 	if !dirExists(dir) {
 		if repo != "" {
-			err = downloadGitHubArchive(repo, resolved, dir, store.Progress)
+			err = downloadGitHubArchive(repo, resolved.revision, dir, store.Progress)
 		} else {
-			err = cloneAtVersion(source, resolved, dir, store.Progress)
+			err = cloneAtVersion(source, resolved.revision, dir, store.Progress)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch %s at %s: %w", source.Repo, resolved, err)
+			return nil, fmt.Errorf("failed to fetch %s at %s: %w", source.Repo, resolved.version, err)
 		}
 	}
-	return &Snapshot{Source: source, Dir: dir, Version: resolved}, nil
+	return &Snapshot{Source: source, Dir: dir, Version: resolved.version, revision: resolved.revision}, nil
 }
 
 // Remove deletes every cached version of the source.
 func (store *Store) Remove(source Source) error {
 	return os.RemoveAll(store.repoDir(source))
+}
+
+// installedRevision reads the revision last applied successfully to the targets.
+func (store *Store) installedRevision(source Source) (string, error) {
+	data, err := os.ReadFile(filepath.Join(store.repoDir(source), "revision"))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to read installed revision of %s: %w", source.Repo, err)
+	}
+	return string(data), nil
+}
+
+// recordInstalledRevision records applied state separately from downloaded snapshots.
+func (store *Store) recordInstalledRevision(source Source, revision string) error {
+	dir := store.repoDir(source)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "revision"), []byte(revision), 0o644)
 }
 
 // prune removes a source's cached snapshots except the installed version.

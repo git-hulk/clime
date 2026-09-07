@@ -14,7 +14,7 @@ References:
 
 ## Summary
 
-clime will use `~/.clime/skills.yaml` to declare Git repositories, locked versions, and selected skills, then reconcile that desired state into `~/.claude/skills` and `~/.codex/skills`. The first version will access public and private repositories through Git, lock each source to a tag or full commit SHA, cache immutable snapshots locally, and automatically restore backups if any apply step fails.
+clime will use `~/.clime/skills.yaml` to declare Git repositories, selected versions, and selected skills, then reconcile that desired state into `~/.claude/skills` and `~/.codex/skills`. The first version will access public and private repositories through Git, preserve latest, tag, and branch names or select a full commit SHA for each source, cache immutable snapshots locally, and automatically restore backups if any apply step fails.
 
 ## Motivation
 
@@ -40,11 +40,11 @@ github.company.com/platform/private-skills:
     - internal-review
 ```
 
-`version` contains either a resolved tag or a full commit SHA. Commands may accept `latest`, a branch, or a short commit as input, but clime will not persist floating or ambiguous values:
+`version` contains `latest`, a tag, branch name, or full commit SHA. Short commit inputs expand to full SHAs:
 
-- `latest` resolves to the highest stable SemVer tag.
-- If a repository has no SemVer tags, `latest` resolves to the default branch's full commit SHA.
-- A branch or short commit resolves to a full commit SHA.
+- `latest` remains in the manifest and resolves to the highest stable SemVer tag on every install, update, and sync.
+- If a repository has no SemVer tags, `latest` resolves to the default branch's full commit SHA for caching, while the manifest still contains `latest`.
+- A branch keeps its name in the manifest and resolves its current head to a full commit SHA for caching. A short commit expands to a full commit SHA.
 - A prerelease is selected only when the user requests it explicitly.
 
 clime treats tags as immutable release identifiers supplied by the repository owner. Users who require strict cross-machine reproducibility must use a full commit SHA. The first version will not add a checksum or separate lock field.
@@ -106,7 +106,7 @@ Gray nodes and edges are unchanged, green paths are added, and red dashed paths 
 
 Snapshot caches will live under `~/.clime/cache`, addressed by canonical repository and a filesystem-safe version. clime will fetch, check out, and validate a snapshot in a temporary directory, then commit it to the cache with a rename. A committed cache entry is immutable: clime will never run `git pull` or edit it in place. Internal cache metadata may record the resolved commit and source details, but this metadata will not be added to `skills.yaml`.
 
-`sync` will not access the network when every referenced snapshot is cached, allowing a cached private repository to recover while credentials or the network are temporarily unavailable. Multiple versions may coexist while preparing an installation. After all selected skills are installed and the manifest is saved successfully, `install`, `update`, and `sync` remove other snapshots of that repository and keep the installed version. Failed operations retain existing snapshots. Returning to a removed version requires fetching it again.
+`sync` will not access the network when every referenced tag or commit snapshot is cached. Branch and `latest` versions require a remote lookup and follow the selected release or branch head. Their cached snapshots remain keyed by resolved tag or commit. Multiple versions may coexist while preparing an installation. After all selected skills are installed and the manifest is saved successfully, `install`, `update`, and `sync` remove other snapshots of that repository and keep the installed version. Failed operations retain existing snapshots. Returning to a removed version requires fetching it again. The last successfully applied revision is stored separately from downloaded snapshots in local cache metadata; update compares against that revision before reporting that skills are up to date. Failed or incomplete installations do not advance this record.
 
 `clime skills purge` will validate the complete manifest and delete every cache entry that the manifest does not reference. It will not remove referenced snapshots, installed skills, or transaction-recovery backups. The first version will not evict entries automatically by age or size because that could remove a version needed for rollback.
 
@@ -123,11 +123,11 @@ If an updated catalog no longer contains any selected skill, the operation fails
 ### 7. CLI changes
 
 - `clime skills install <repo>[@<version>]` reads the target catalog and opens an interactive multi-select. Omitting the version means `latest`. Confirmation updates the manifest and reconciles it.
-- `clime skills update [<repo>[@<version>]]` updates one source when a repository is specified and updates every source to `latest` when no argument is given. An explicit branch or commit follows that query. Both forms preserve the selected skills.
+- `clime skills update [<repo>[@<version>]]` updates one source when a repository is specified and follows each saved branch, or selects `latest` for tag and commit versions, when no argument is given. An explicit branch or commit follows that query. Both forms preserve the selected skills.
 - `clime skills uninstall [<skill>]` removes the selection from its repository. Removing the final skill also removes the repository entry, after which clime reconciles the manifest.
-- `clime skills sync` applies only the versions already locked in the manifest. It does not select a new version or perform an implicit update.
+- `clime skills sync` applies the saved tags and commits, or resolves saved branches and `latest` remotely, without changing those version names.
 - `clime skills purge` removes cache entries not referenced by the manifest.
-- `clime skills list` shows repositories, locked versions, selected skills, and target state without network access.
+- `clime skills list` shows repositories, selected versions, selected skills, and target state without network access.
 
 CLI repository arguments accept both the GitHub shorthand `owner/repo` and an explicit `host/owner/repo`. The `repo@version` parser recognizes a version suffix after the repository path. In `git@github.com:acme/agent-skills.git@v1.4.2`, it does not treat the first `@`, which belongs to the SSH user, as the version separator. CLI output and errors use a credential-free canonical repository rather than the original transport URL.
 
@@ -155,8 +155,8 @@ To restore an earlier skill version, select that repository version in the manif
 | --- | --- | --- |
 | YAML mutations destroy comments | Unit | After install, update, and uninstall round trips on a manifest with document, repository, and skill comments, comments on untouched nodes and their relative order remain unchanged. |
 | Repository aliases or skill conflicts cause partial writes | Unit + integration | Given both `acme/agent-skills` and `github.com/acme/agent-skills`, duplicate skills, or a cross-source name collision, the command reports every conflict, never invokes the Git runner, and leaves the manifest, cache, and both agent targets byte-for-byte unchanged. |
-| `latest` selects the wrong version | Integration | Given a temporary Git repository with stable, prerelease, and non-SemVer tags, `latest` selects the highest stable SemVer; without a SemVer tag, it stores the default branch's full HEAD SHA. |
-| A branch or short commit remains floating or ambiguous | Integration | After install receives a branch or short commit, the persisted `version` equals the full commit SHA resolved at that time. |
+| `latest` selects the wrong version | Integration | Given a temporary Git repository with stable, prerelease, and non-SemVer tags, `latest` selects the highest stable SemVer; without a SemVer tag, it fetches the default branch's full HEAD SHA. The manifest retains `latest` in either case. |
+| Branch names or commit identity are lost | Integration | Install preserves a branch name; sync and update follow its head while retaining that name and caching by commit SHA. Short commits expand to full SHAs. |
 | The SSH `@` is parsed as a version separator | Unit | `git@host:owner/repo.git@v1.2.3` resolves to the SSH repository plus `v1.2.3`, while an SSH URL without a version produces no false version suffix. |
 | Private credentials leak | Unit + integration | Given a remote and Git error containing HTTPS userinfo or a token, the manifest, stdout, stderr, and returned error contain no credential while the Git runner still uses system credential configuration. |
 | Cached sync still requires the network | Integration | After caching a private snapshot, disable the Git runner and run `sync`; both agent targets restore successfully from cache. |
@@ -184,7 +184,7 @@ Before release, run the candidate binary in an isolated HOME through end-to-end 
 
 - **Add a `repositories` wrapper or `schema` field.** A top-level repository mapping already guarantees one entry per source, and fixed legacy keys distinguish the old format. Extra nesting does not improve first-version behavior.
 - **Store both a tag and resolved commit.** This detects moved tags, but adds a manifest field that was explicitly rejected. Users requiring strict identity can store the full commit SHA in `version`.
-- **Persist `latest` or a branch.** Every sync could install different content, violating locked desired state. clime resolves these inputs before writing.
+- **Replace floating versions with resolved revisions in the manifest.** This would discard the user's selection. clime preserves branch names and `latest`, and records the successfully applied revision in local cache metadata.
 - **Build a remote proxy in the first version.** A proxy reduces duplicate downloads but introduces deployment, authentication, private-path isolation, and operational ownership. Local cache plus Git transport already avoids GitHub REST API quotas.
 - **Keep mutable shallow clones and run `git pull`.** A cache tied to current branch state cannot retain multiple immutable versions or guarantee offline rollback.
 - **Automatically namespace duplicate skill names by repository.** This changes the skill names agents discover and may break existing prompts. The first version requires the user to resolve the collision before apply.

@@ -38,7 +38,7 @@ func TestResolveVersionLikeGoGet(t *testing.T) {
 		{"v1.0", "v1.0.0"},
 		{"v1.2.0-rc.1", "v1.2.0-rc.1"}, // exact tag, even a prerelease
 		{"2.0.0", "2.0.0"},             // exact tag, even non-semver
-		{"feature-x", firstSHA},        // branch resolves to its head commit
+		{"feature-x", "feature-x"},     // branch name is preserved
 		{headSHA, headSHA},             // full SHA resolves to itself
 		{headSHA[:12], headSHA},        // advertised short SHA expands
 	}
@@ -48,7 +48,16 @@ func TestResolveVersionLikeGoGet(t *testing.T) {
 		if !assert.NoError(t, err, "resolveVersion(%q)", tt.query) {
 			continue
 		}
-		assert.Equal(t, tt.want, got)
+		wantVersion := tt.want
+		if tt.query == "" || tt.query == "latest" {
+			wantVersion = "latest"
+		}
+		assert.Equal(t, wantVersion, got.version)
+		if tt.query == "feature-x" {
+			assert.Equal(t, firstSHA, got.revision)
+		} else {
+			assert.Equal(t, tt.want, got.revision)
+		}
 	}
 
 	for _, query := range []string{"v9", "no-such-ref", "deadbeefdead"} {
@@ -66,7 +75,8 @@ func TestResolveVersionLatestWithoutSemverTags(t *testing.T) {
 
 	got, err := resolveVersion(Source{Repo: remote}, "latest")
 	require.NoError(t, err)
-	require.Equal(t, headSHA, got)
+	require.Equal(t, "latest", got.version)
+	require.Equal(t, headSHA, got.revision)
 }
 
 func TestResolveVersionLatestPrefersPrereleaseOverHead(t *testing.T) {
@@ -78,7 +88,8 @@ func TestResolveVersionLatestPrefersPrereleaseOverHead(t *testing.T) {
 
 	got, err := resolveVersion(Source{Repo: remote}, "latest")
 	require.NoError(t, err)
-	require.Equal(t, "v0.2.0-beta.1", got)
+	require.Equal(t, "latest", got.version)
+	require.Equal(t, "v0.2.0-beta.1", got.revision)
 }
 
 func TestResolveVersionFullSHASkipsNetwork(t *testing.T) {
@@ -87,5 +98,5 @@ func TestResolveVersionFullSHASkipsNetwork(t *testing.T) {
 	sha := strings.Repeat("ab12", 10)
 	got, err := resolveVersion(Source{Repo: "no-such-owner/no-such-repo"}, sha)
 	require.NoError(t, err)
-	require.Equal(t, sha, got)
+	require.Equal(t, sha, got.version)
 }

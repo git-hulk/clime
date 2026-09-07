@@ -125,10 +125,11 @@ func (manager *Manager) Install(snapshot *Snapshot, entries []Entry) (int, error
 }
 
 // Update moves one source to the version its query resolves to (latest
-// when it carries none), re-installing its installed skills from the new
-// catalog. The update is refused when the new catalog no longer lists an
-// installed skill, so a skill is never removed implicitly. After successful
-// installation, other cached versions of the source are removed. Returns how
+// when it carries none, unless the saved version names a branch),
+// re-installing its installed skills from the new catalog. The update is
+// refused when the new catalog no longer lists an installed skill, so a skill
+// is never removed implicitly. After successful installation, other cached
+// versions of the source are removed. Returns how
 // many skills changed; zero with a nil error means already up to date.
 func (manager *Manager) Update(source Source) (int, error) {
 	events := manager.events()
@@ -138,13 +139,37 @@ func (manager *Manager) Update(source Source) (int, error) {
 	}
 
 	events.SourceResolving(VerbUpdate, source)
-	snapshot, err := manager.Store.Snapshot(source)
+	current, _ := manager.Manifest.GetSource(source)
+	var snapshot *Snapshot
+	var err error
+	if source.Query == "" && current.Version != "" && !fullSHAPattern.MatchString(current.Version) {
+		snapshot, err = manager.Store.Snapshot(source.WithQuery(current.Version))
+		if err != nil {
+			events.SourceFailed(VerbUpdate, source, err)
+			return 0, err
+		}
+	}
+	// Keep following a saved branch or latest. Tags and commits update to latest.
+	if snapshot == nil || snapshot.Version == snapshot.revision {
+		snapshot, err = manager.Store.Snapshot(source)
+	}
 	if err != nil {
 		events.SourceFailed(VerbUpdate, source, err)
 		return 0, err
 	}
 
-	if current, _ := manager.Manifest.GetSource(source); snapshot.Version != "" && snapshot.Version == current.Version {
+	installedRevision, err := manager.Store.installedRevision(source)
+	if err != nil {
+		events.SourceFailed(VerbUpdate, source, err)
+		return 0, err
+	}
+	if snapshot.revision != "" && snapshot.revision == installedRevision {
+		if snapshot.Version != current.Version {
+			manager.Manifest.SetSourceVersion(source, snapshot.Version)
+			if err := manager.Manifest.Save(); err != nil {
+				return 0, fmt.Errorf("failed to save source version: %w", err)
+			}
+		}
 		events.SourceUpToDate(source, snapshot.Version)
 		return 0, nil
 	}
@@ -175,10 +200,10 @@ func (manager *Manager) Update(source Source) (int, error) {
 	return manager.install(VerbUpdate, snapshot, entries)
 }
 
-// Sync re-installs a source's skills at the version locked in the
-// manifest, using skills/<name> paths, and returns how many skills it
-// re-installed. A source without a locked version is installed at latest
-// and the resolved version is recorded. After successful installation,
+// Sync re-installs a source's skills at the saved version, following branch
+// names to their current head and using skills/<name> paths. It returns how
+// many skills it re-installed. A source without a saved version uses latest.
+// Branch names and latest are preserved and resolved remotely on each sync. After successful installation,
 // other cached versions of the source are removed.
 func (manager *Manager) Sync(source Source) (int, error) {
 	events := manager.events()
@@ -247,7 +272,10 @@ func (manager *Manager) install(verb Verb, snapshot *Snapshot, entries []Entry) 
 		return len(entries) - failed, fmt.Errorf("%d skill(s) failed", failed)
 	}
 	if len(entries) > 0 && snapshot.Version != "" && len(manager.Targets) > 0 {
-		if err := manager.Store.prune(snapshot.Source, snapshot.Version); err != nil {
+		if err := manager.Store.recordInstalledRevision(snapshot.Source, snapshot.revision); err != nil {
+			return len(entries), fmt.Errorf("skills installed but failed to record installed revision: %w", err)
+		}
+		if err := manager.Store.prune(snapshot.Source, snapshot.revision); err != nil {
 			return len(entries), fmt.Errorf("skills installed but failed to remove old snapshots: %w", err)
 		}
 	}
@@ -256,7 +284,7 @@ func (manager *Manager) install(verb Verb, snapshot *Snapshot, entries []Entry) 
 
 // installEntry writes one skill from the snapshot into every target and
 // records it in the manifest. The resolved version is recorded on the
-// source, so a floating query is never persisted.
+// source; branch names and latest are preserved independently of the cache revision.
 func (manager *Manager) installEntry(verb Verb, snapshot *Snapshot, entry Entry) error {
 	events := manager.events()
 	events.SkillInstalling(verb, entry.Name, snapshot.Source)

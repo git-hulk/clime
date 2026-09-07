@@ -203,13 +203,14 @@ var skillsInstallCmd = &cobra.Command{
 	Use:   "install [owner/repo[@version]|path]",
 	Short: "Install skills from a GitHub repository or local path",
 	Long: "Install skills from a GitHub repository or local path. A repository source " +
-		"without a version uses its locked version from the selected manifest, reusing " +
-		"the local cache when available. Without a lock, it resolves latest. Use " +
+		"without a version uses its saved version from the selected manifest. Tags and " +
+		"commits reuse the local cache; branches and latest are checked remotely. Without a " +
+		"saved version, it saves latest. Use " +
 		"owner/repo@latest or `clime skills update` to check for a newer version. " +
 		"A Go-style version suffix is resolved like `go get`: owner/repo@latest " +
 		"picks the highest stable semver tag, " +
-		"owner/repo@v1 the highest v1.x.y tag, and an exact tag, branch, or commit SHA " +
-		"pins that revision.",
+		"owner/repo@v1 the highest v1.x.y tag. The manifest preserves latest, exact tag " +
+		"and branch names, and full commit SHAs.",
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := skill.LoadManifest(skillsManifestPath)
@@ -234,7 +235,9 @@ var skillsUpdateCmd = &cobra.Command{
 	Long: "Update the skills installed from a source repository. With no argument every " +
 		"source is updated to its latest version. With a repository, only that source is " +
 		"updated: to latest, or to the version given by a Go-style suffix such as " +
-		"owner/repo@v1.2.3 or owner/repo@v1. The set of installed skills is preserved.",
+		"owner/repo@v1.2.3 or owner/repo@v1. Saved branches and latest are checked remotely " +
+		"and retain their names. Unchanged installed revisions are skipped. " +
+		"The set of installed skills is preserved.",
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := skill.LoadManifest(skillsManifestPath)
@@ -255,11 +258,11 @@ var skillsUpdateCmd = &cobra.Command{
 
 var skillsSyncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Reinstall skills at the versions locked in the manifest",
+	Short: "Reinstall skills at the versions saved in the manifest",
 	Long: "Reinstall every skill recorded in the selected manifest from its source at the " +
-		"locked version, without looking for a newer one. Versions already cached under " +
-		"~/.clime/sources are applied without network access. Use `clime skills update` " +
-		"to move a source to a newer version.",
+		"saved version. Cached tags and commits are applied without network access. " +
+		"Branches and latest are preserved and checked remotely on every sync. " +
+		"Use `clime skills update` to move a tag or commit to a newer version.",
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := skill.LoadManifest(skillsManifestPath)

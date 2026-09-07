@@ -113,7 +113,8 @@ func TestSnapshotResolvesLatestAndCaches(t *testing.T) {
 
 	snap, err := st.Snapshot(src)
 	require.NoError(t, err)
-	require.Equal(t, "v1.0.0", snap.Version)
+	require.Equal(t, "latest", snap.Version)
+	require.Equal(t, "v1.0.0", snap.revision)
 	require.True(t, strings.HasSuffix(snap.Dir, "@v1.0.0"))
 	require.Equal(t, "v1.0.0", checkoutVersion(t, snap.Dir))
 

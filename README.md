@@ -122,7 +122,7 @@ across pages. The numbered picker
 supports `n` and `p` for navigation. Piping `clime skills list` prints every skill.
 
 The manifest at `~/.clime/skills.yaml` groups selected skills by source, with one
-locked version per source:
+selected version per source:
 
 ```yaml
 AfterShip/Skills:
@@ -151,13 +151,27 @@ and its parent directories are created automatically. This option only changes
 the manifest location; skill installation directories and the source cache stay
 the same.
 
-Installing without a version uses that lock and reuses the local cache without
-network access when available. If the locked version is not cached, it is fetched;
-if there is no lock, install resolves latest. An explicit `@latest` checks upstream.
-`sync` applies those versions as-is (from the local cache when available, so it works
-offline), while `update` resolves a newer version and rewrites the lock. An update
-is refused when the new version no longer provides an installed skill, so skills
-are never removed implicitly.
+`latest`, tag names, and branch names are preserved in `version`; commit
+prefixes expand to full commit SHAs. For example, installing `owner/repo@main`
+saves `version: main`, and `owner/repo@latest` saves `version: latest`.
+
+Installing without a version uses the saved version. Tags and commits reuse the
+local cache without network access when available. Branches and `latest` are
+resolved remotely on every install, sync, and update.
+The manifest keeps the requested version, while the cache uses the resolved tag
+or commit. `latest` selects the newest stable release tag, with default-branch
+fallback when no release tags exist. Sync for branches and `latest` therefore
+requires access to the remote.
+
+With no saved version, install saves `latest`. An explicit `@latest` checks
+upstream. `update` without an explicit version follows a saved branch or `latest`;
+for tags and commits it selects latest. An update is refused when the new version no
+longer provides an installed skill, so skills are never removed implicitly.
+
+The last successfully installed revision is recorded in local cache metadata,
+separate from `skills.yaml`. Update compares it with the resolved revision and
+reports when skills are already up to date. A downloaded snapshot alone is not
+considered installed. Sync still restores the selected skill files.
 
 After a successful `install`, `update`, or `sync`, clime keeps the installed
 version's snapshot and deletes the other cached versions of that repository.

@@ -24,6 +24,12 @@ type versionRefs interface {
 	String() string
 }
 
+// resolvedVersion separates the manifest version from the immutable cache revision.
+type resolvedVersion struct {
+	version  string
+	revision string
+}
+
 // resolveVersion resolves a version query against the remote's advertised
 // refs, following the same rules as `go get`:
 //
@@ -33,15 +39,14 @@ type versionRefs interface {
 //   - "v1" or "v1.2" selects the highest semver tag in that major or
 //     major.minor line.
 //   - An existing tag resolves to itself.
-//   - A branch resolves to its head commit SHA.
+//   - A branch keeps its name, with its head commit SHA as the cache revision.
 //   - A full commit SHA resolves to itself; a shorter SHA prefix resolves
 //     when it uniquely matches an advertised ref.
 //
-// The result is always a concrete tag or full commit SHA, never a floating
-// value.
-func resolveVersion(source versionRefs, query string) (string, error) {
+// The cache revision is always a concrete tag or full commit SHA.
+func resolveVersion(source versionRefs, query string) (resolvedVersion, error) {
 	if fullSHAPattern.MatchString(query) {
-		return query, nil
+		return resolvedVersion{version: query, revision: query}, nil
 	}
 	if query == "" || query == "latest" {
 		return resolveLatest(source)
@@ -49,46 +54,47 @@ func resolveVersion(source versionRefs, query string) (string, error) {
 
 	tags, err := source.remoteTags()
 	if err != nil {
-		return "", err
+		return resolvedVersion{}, err
 	}
 	for _, tag := range tags {
 		if tag == query {
-			return tag, nil
+			return resolvedVersion{version: tag, revision: tag}, nil
 		}
 	}
 	if semverQueryPattern.MatchString(query) {
 		if version := maxSemverTag(tags, query); version != "" {
-			return version, nil
+			return resolvedVersion{version: version, revision: version}, nil
 		}
-		return "", fmt.Errorf("no version of %s matches query %q", source, query)
+		return resolvedVersion{}, fmt.Errorf("no version of %s matches query %q", source, query)
 	}
 	if sha, ok, err := source.remoteRefCommit("refs/heads/" + query); err != nil {
-		return "", err
+		return resolvedVersion{}, err
 	} else if ok {
-		return sha, nil
+		return resolvedVersion{version: query, revision: sha}, nil
 	}
 	if shortSHAPattern.MatchString(query) {
-		return source.expandShortSHA(query)
+		sha, err := source.expandShortSHA(query)
+		return resolvedVersion{version: sha, revision: sha}, err
 	}
-	return "", fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, source)
+	return resolvedVersion{}, fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, source)
 }
 
-func resolveLatest(source versionRefs) (string, error) {
+func resolveLatest(source versionRefs) (resolvedVersion, error) {
 	tags, err := source.remoteTags()
 	if err != nil {
-		return "", err
+		return resolvedVersion{}, err
 	}
 	if version := maxSemverTag(tags, ""); version != "" {
-		return version, nil
+		return resolvedVersion{version: "latest", revision: version}, nil
 	}
 	sha, ok, err := source.remoteRefCommit("HEAD")
 	if err != nil {
-		return "", err
+		return resolvedVersion{}, err
 	}
 	if !ok {
-		return "", fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", source)
+		return resolvedVersion{}, fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", source)
 	}
-	return sha, nil
+	return resolvedVersion{version: "latest", revision: sha}, nil
 }
 
 // maxSemverTag returns the highest semver tag, preferring stable releases

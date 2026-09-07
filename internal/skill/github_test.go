@@ -75,7 +75,8 @@ func TestGitHubSnapshotUsesAuthenticatedGHAndReusesCache(t *testing.T) {
 	src := Source{Repo: "owner/repo"}
 	snap, err := st.Snapshot(src)
 	require.NoError(t, err)
-	require.Equal(t, "v2.0.0", snap.Version)
+	require.Equal(t, "latest", snap.Version)
+	require.Equal(t, "v2.0.0", snap.revision)
 	catalog, err := snap.Catalog()
 	require.NoError(t, err)
 	require.Len(t, catalog.Skills, 1)
@@ -126,17 +127,27 @@ func TestGitHubVersionQueries(t *testing.T) {
 	dir := fakeGitHubCLI(t)
 	for _, tt := range []struct{ query, want string }{
 		{"latest", "v2.0.0"}, {"v1", "v1.0.0"}, {"v1.0", "v1.0.0"},
-		{"v1.0.0", "v1.0.0"}, {"main", strings.Repeat("b", 40)},
+		{"v1.0.0", "v1.0.0"}, {"main", "main"},
 		{strings.Repeat("c", 40), strings.Repeat("c", 40)}, {"bbbbbbb", strings.Repeat("b", 40)},
 	} {
 		got, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, tt.query)
 		require.NoError(t, err)
-		require.Equal(t, tt.want, got)
+		wantVersion := tt.want
+		if tt.query == "latest" {
+			wantVersion = "latest"
+		}
+		require.Equal(t, wantVersion, got.version)
+		if tt.query == "main" {
+			require.Equal(t, strings.Repeat("b", 40), got.revision)
+		} else {
+			require.Equal(t, tt.want, got.revision)
+		}
 	}
 	writeFile(t, filepath.Join(dir, "tags"), "")
 	got, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, "latest")
 	require.NoError(t, err)
-	require.Equal(t, strings.Repeat("b", 40), got)
+	require.Equal(t, "latest", got.version)
+	require.Equal(t, strings.Repeat("b", 40), got.revision)
 	for _, query := range []string{"missing", "v9", "ddddddd"} {
 		_, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, query)
 		require.Error(t, err)
@@ -170,7 +181,8 @@ func TestGitHubLoggedOutUsesGit(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/owner/repo.git")
 	snap, err := newTestStore(t).Snapshot(Source{Repo: "owner/repo"})
 	require.NoError(t, err)
-	require.Equal(t, "v1.0.0", snap.Version)
+	require.Equal(t, "latest", snap.Version)
+	require.Equal(t, "v1.0.0", snap.revision)
 	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
 	require.NotContains(t, string(calls), "api ")
 }
