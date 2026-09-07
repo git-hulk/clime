@@ -129,7 +129,7 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 		if err != nil {
 			continue
 		}
-		_, catalog, err := mgr.Fetch(src)
+		snap, catalog, err := mgr.Fetch(src)
 		if err != nil {
 			continue
 		}
@@ -143,7 +143,7 @@ func installFromPluginSkills(manifest *skill.Manifest) error {
 			}
 			candidates = append(candidates, skillCandidate{
 				entry: entry,
-				src:   src,
+				src:   src.WithQuery(snap.Version),
 				label: label,
 			})
 		}

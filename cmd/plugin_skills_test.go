@@ -5,8 +5,50 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/git-hulk/clime/internal/prompt"
 	"github.com/git-hulk/clime/internal/skill"
 )
+
+func TestInstallFromPluginSkillsUsesLockedCacheOffline(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	// No git or gh on PATH: browsing and installing must both use the cache.
+	t.Setenv("PATH", binDir)
+	if err := os.WriteFile(filepath.Join(binDir, "clime-cached"), []byte("#!/bin/sh\necho owner/repo\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(home, ".clime", "sources", "owner", "repo@v1.0.0")
+	if err := os.MkdirAll(filepath.Join(cache, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		"skills.yaml":    "skills:\n  - name: alpha\n    path: alpha\n",
+		"alpha/SKILL.md": "# cached alpha",
+	} {
+		if err := os.WriteFile(filepath.Join(cache, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := &skill.Manifest{Sources: []skill.SourceRecord{{Repo: "owner/repo", Version: "v1.0.0"}}}
+	defer stubSkillPrompts(t)()
+	multiSelectPrompt = func(config prompt.SelectConfig) ([]int, error) {
+		if len(config.Options) != 1 {
+			t.Fatalf("options = %v, want the cached alpha skill", config.Options)
+		}
+		return []int{0}, nil
+	}
+	if err := installFromPluginSkills(manifest); err != nil {
+		t.Fatalf("installFromPluginSkills() error = %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(home, ".agents", "skills", "alpha", "SKILL.md"))
+	if err != nil || string(content) != "# cached alpha" {
+		t.Fatalf("installed content = %q, %v, want cached alpha", content, err)
+	}
+	if record, _ := manifest.GetSource(skill.Source{Repo: "owner/repo"}); record.Version != "v1.0.0" {
+		t.Fatalf("locked version = %q, want v1.0.0", record.Version)
+	}
+}
 
 func TestTryInstallPluginSkillsPluginNotFound(t *testing.T) {
 	t.Parallel()

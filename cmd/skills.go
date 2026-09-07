@@ -150,8 +150,11 @@ var skillsInstallCmd = &cobra.Command{
 	Use:   "install [owner/repo[@version]|path]",
 	Short: "Install skills from a GitHub repository or local path",
 	Long: "Install skills from a GitHub repository or local path. A repository source " +
-		"may carry a Go-style version suffix resolved like `go get`: owner/repo@latest " +
-		"(the default when no version is given) picks the highest stable semver tag, " +
+		"without a version uses its locked version from ~/.clime/skills.yaml, reusing " +
+		"the local cache when available. Without a lock, it resolves latest. Use " +
+		"owner/repo@latest or `clime skills update` to check for a newer version. " +
+		"A Go-style version suffix is resolved like `go get`: owner/repo@latest " +
+		"picks the highest stable semver tag, " +
 		"owner/repo@v1 the highest v1.x.y tag, and an exact tag, branch, or commit SHA " +
 		"pins that revision.",
 	Args: cobra.MaximumNArgs(1),

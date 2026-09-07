@@ -96,7 +96,7 @@ removes the shared files and Claude link.
 Install, update, sync, list, and uninstall skills from GitHub repositories or local paths:
 
 ```sh
-clime skills install owner/repo         # browse and install skills (same as @latest)
+clime skills install owner/repo         # use the locked version, or latest if none
 clime skills install owner/repo@latest  # highest stable semver tag, like go get
 clime skills install owner/repo@v1      # highest v1.x.y tag
 clime skills install owner/repo@v1.2.3  # pin to a tag, branch, or commit SHA
@@ -110,8 +110,11 @@ clime skills list                       # list installed skills
 clime skills uninstall <name>           # remove a skill
 ```
 
-The manifest at `~/.clime/skills.yaml` records each source's locked version. `sync`
-applies those versions as-is (from the local cache when available, so it works
+The manifest at `~/.clime/skills.yaml` records each source's locked version.
+Installing without a version uses that lock and reuses the local cache without
+network access when available. If the locked version is not cached, it is fetched;
+if there is no lock, install resolves latest. An explicit `@latest` checks upstream.
+`sync` applies those versions as-is (from the local cache when available, so it works
 offline), while `update` resolves a newer version and rewrites the lock. An update
 is refused when the new version no longer provides an installed skill, so skills
 are never removed implicitly.

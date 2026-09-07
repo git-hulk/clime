@@ -95,8 +95,15 @@ func (m *Manager) events() Events {
 }
 
 // Fetch materializes a source and reads its catalog, for browsing before
-// an install. It reports no events; wrap it with caller-side progress.
+// an install. With no query, it uses the manifest's locked version when
+// available, otherwise latest. It reports no events; wrap it with
+// caller-side progress.
 func (m *Manager) Fetch(src Source) (*Snapshot, *Catalog, error) {
+	if src.Query == "" && !src.IsLocal() {
+		if record, ok := m.Manifest.GetSource(src); ok && record.Version != "" {
+			src = src.WithQuery(record.Version)
+		}
+	}
 	snap, err := m.Store.Snapshot(src)
 	if err != nil {
 		return nil, nil, err

@@ -164,6 +164,78 @@ func TestManagerInstallRequiresSkillMd(t *testing.T) {
 	}
 }
 
+func TestManagerInstallUsesLockedCacheOffline(t *testing.T) {
+	for _, version := range []string{"v1.0.0", strings.Repeat("a", 40)} {
+		t.Run(version, func(t *testing.T) {
+			src := Source{Repo: "file://" + filepath.Join(t.TempDir(), "unavailable")}
+			manifest := &Manifest{Sources: []SourceRecord{{Repo: src.Repo, Version: version}}}
+			mgr, home := newTestManager(t, manifest)
+			dir := versionDir(mgr.Store.repoDir(src), version)
+			writeFile(t, filepath.Join(dir, "skills.yaml"), "skills:\n  - name: alpha\n    path: skills/alpha\n")
+			writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "# cached alpha")
+
+			snap, catalog, err := mgr.Fetch(src)
+			if err != nil {
+				t.Fatalf("Fetch() offline error = %v", err)
+			}
+			if snap.Version != version || snap.Dir != dir {
+				t.Fatalf("snapshot = %+v, want cached version %s at %s", snap, version, dir)
+			}
+			if n, err := mgr.Install(snap, catalog.Skills); err != nil || n != 1 {
+				t.Fatalf("Install() = (%d, %v), want (1, nil)", n, err)
+			}
+			if got := readInstalledSkill(t, home, "alpha"); got != "# cached alpha" {
+				t.Fatalf("installed content = %q, want cached content", got)
+			}
+			saved, err := LoadManifest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record, _ := saved.GetSource(src); record.Version != version {
+				t.Fatalf("install changed the lock to %q, want %q", record.Version, version)
+			}
+		})
+	}
+}
+
+func TestManagerFetchHonorsQueriesAndFetchesMissingVersions(t *testing.T) {
+	remote := newSkillRemote(t)
+	remote.release("v1.0.0", map[string]string{"alpha": "# v1"})
+	remote.release("v2.0.0", map[string]string{"alpha": "# v2"})
+
+	for _, tt := range []struct {
+		name, locked, query, want string
+	}{
+		{"uncached lock", "v1.0.0", "", "v1.0.0"},
+		{"no lock", "", "", "v2.0.0"},
+		{"explicit latest", "v1.0.0", "latest", "v2.0.0"},
+		{"explicit tag", "v2.0.0", "v1.0.0", "v1.0.0"},
+		{"explicit semver line", "v2.0.0", "v1", "v1.0.0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			src := Source{Repo: remote.URL, Query: tt.query}
+			manifest := &Manifest{}
+			if tt.locked != "" {
+				manifest.SetSourceVersion(src, tt.locked)
+			}
+			mgr, _ := newTestManager(t, manifest)
+			snap, catalog, err := mgr.Fetch(src)
+			if err != nil {
+				t.Fatalf("Fetch() error = %v", err)
+			}
+			if snap.Version != tt.want {
+				t.Fatalf("version = %q, want %q", snap.Version, tt.want)
+			}
+			if _, ok := catalog.Find("alpha"); !ok {
+				t.Fatal("fetched catalog does not contain alpha")
+			}
+			if record, _ := manifest.GetSource(src); record.Version != tt.locked {
+				t.Fatalf("browsing changed the lock to %q, want %q", record.Version, tt.locked)
+			}
+		})
+	}
+}
+
 func TestManagerInstallWithoutTargets(t *testing.T) {
 	repoDir := t.TempDir()
 	writeFile(t, filepath.Join(repoDir, "skills", "alpha", "SKILL.md"), "# Alpha")
