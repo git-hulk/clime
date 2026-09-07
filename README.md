@@ -1,197 +1,105 @@
 # clime
 
-As more agents move from MCP servers to CLIs, it gets hard to track what's installed and keep things up to date. For organizations with many internal tools, there's often no single place for employees to discover and download them.
+**Install, run, and update CLI tools and AI agent skills from one command.**
 
-**clime** solves this — a unified CLI manager that lets you install, discover, and update CLI plugins from one place.
+- **CLI plugins:** install from GitHub Releases, npm, Homebrew, or scripts; run them as `clime <name>`.
+- **Agent skills:** manage skills for Claude Code and Codex from repositories or local directories.
+- **Team setup:** share a manifest to install the same tools and skills across your team.
 
-## Features
-
-- **Unified entry point** — any `clime-<name>` binary becomes a `clime <name>` subcommand, no config needed
-- **Discover & manage** — list, install, update, and remove plugins with simple commands
-- **Multiple sources** — install plugins from GitHub Releases, npm, Homebrew, or custom scripts
-- **Team toolchains** — share a YAML manifest so everyone gets the same set of tools via `clime init`
-- **Self-updating** — keep both clime and its plugins up to date with one command
-
-## Installation
+## Install
 
 ```sh
 curl -sSfL https://raw.githubusercontent.com/git-hulk/clime/master/scripts/install.sh | sh
 ```
 
-Or build from source (requires Go 1.25+):
+Supports macOS and Linux on amd64 and arm64. Installs to `~/.local/bin` and adds it to your shell profile's `PATH` if needed.
+
+## CLI plugins
 
 ```sh
-git clone https://github.com/git-hulk/clime.git && cd clime && make install
-```
-
-The install script detects your OS (macOS / Linux) and architecture (amd64 / arm64) automatically.
-By default it installs `clime` to `~/.local/bin` and updates your shell profile if that directory is not already on `PATH`.
-
-## How It Works
-
-Install a plugin, then use it as a subcommand — clime forwards all arguments to the underlying binary:
-
-```sh
-# Install a plugin from GitHub Releases (default — looks for git-hulk/clime-<name>)
-clime plugin install mytools
-clime plugin install mytools --repo owner/repo   # custom GitHub repo
-
-# Install a plugin via a custom install script
-clime plugin install account --script https://example.com/install.sh --binary-path ~/.local/bin/clime-account
-
-# Install a plugin from npm
 clime plugin install opencli --npm @jackwener/opencli
-
-# Install a plugin from Homebrew
-clime plugin install golangci-lint --brew golangci-lint
-
-# Interactive mode — wizard prompts for name, source, and details
-clime plugin install
-
-# Now use it — clime dispatches to the clime-<name> binary
-clime account login --user hulk
-clime account list
 clime opencli --help
+
+clime plugin list
+clime plugin update all
+clime plugin uninstall opencli
 ```
 
-Any binary named `clime-<name>` on your `PATH` or in `~/.clime/plugins/` is automatically discovered — no extra config needed.
+Any `clime-<name>` binary on `PATH` or in `~/.clime/plugins/` becomes a `clime <name>` subcommand. Arguments pass through to the binary.
 
-Manage all your plugins with a handful of commands:
+Run `clime plugin install` for an interactive setup, or choose a source:
 
 ```sh
-clime plugin list               # discover installed plugins
-clime plugin update all         # keep everything up to date
-clime plugin remove account     # uninstall cleanly
+clime plugin install mytools --repo owner/repo
+clime plugin install golangci-lint --brew golangci-lint
+clime plugin install account --script https://example.com/install.sh --binary-path ~/.local/bin/clime-account
 ```
 
-Bootstrap an entire toolchain at once with `clime init`, using the built-in defaults or a custom YAML manifest:
+## AI agent skills
 
 ```sh
-clime init                                  # recorded URL, or built-in defaults
-clime init https://example.com/tools.yaml   # use and record your team's plugin list
+clime skills install owner/repo  # choose skills from a repository
+clime skills install /local/path # or use a local directory
+clime skills list
+clime skills update              # check all sources for updates
+clime skills sync                # restore skills from the saved manifest
+clime skills uninstall my-skill
 ```
 
-## AI Agent Skills
+Skills live in `~/.agents/skills/<name>/`, with links in `~/.claude/skills/` when `~/.claude` exists. Source repositories must store each skill at `skills/<name>/SKILL.md`.
 
-clime can manage AI agent skills for Claude Code and Codex.
+To teach agents how to use clime, install its bundled skill with `clime install skill`.
 
-### Built-in skill
+### Versions and manifest
 
-Install the bundled clime-cli skill so agents can discover and manage plugins on your behalf:
-
-```sh
-clime install skill
-```
-
-This installs the skill into `~/.agents/skills/clime-cli/`. When `~/.claude`
-exists, `~/.claude/skills/clime-cli` is a symlink to that directory.
-
-### Skills from repositories
-
-Skills use the same layout: files in `~/.agents/skills/<name>/`, a symlink in
-`~/.claude/skills/<name>` when `~/.claude` exists. Reinstalling or syncing an
-existing skill replaces its old Claude directory with the symlink. Uninstall
-removes the shared files and Claude link.
-
-Repositories can provide `skills.yaml`, `skills.yml`,
-`.claude-plugin/marketplace.json`, or `.claude-plugin/plugin.json`. As a final
-fallback, clime discovers `skills/<name>/SKILL.md` directly. It reads names and
-descriptions from frontmatter, using the directory name when no name is provided.
-
-Install, update, sync, list, and uninstall skills from GitHub repositories or local paths:
-
-```sh
-clime skills install owner/repo         # use the locked version, or latest if none
-clime skills install owner/repo@latest  # highest stable semver tag, like go get
-clime skills install owner/repo@v1      # highest v1.x.y tag
-clime skills install owner/repo@v1.2.3  # pin to a tag, branch, or commit SHA
-clime skills install /local/path        # install from a local directory
-clime skills install                    # interactive mode — pick a source and skills
-clime skills update                     # update every source to its latest version
-clime skills update owner/repo          # update one source to latest
-clime skills update owner/repo@v1.2.3   # move one source to a specific version
-clime skills sync                       # reinstall skills at the versions locked in the manifest
-clime skills list                       # list installed skills
-clime skills uninstall <name>           # remove a skill
-```
-
-The installed-skills list and install picker show 10 skills per page. Use the
-left/right arrows to change pages. The list also offers Next page, Previous page,
-and Done. In the picker, up/down moves between skills, and selections are kept
-across pages. The numbered picker
-supports `n` and `p` for navigation. Piping `clime skills list` prints every skill.
-
-The manifest at `~/.clime/skills.yaml` groups selected skills by source, with one
-selected version per source:
+Selected skills are saved by source in `~/.clime/skills.yaml`:
 
 ```yaml
 AfterShip/Skills:
   skills:
     - rest-api-design
-    - test-abc
-  version: f8c4c0e02021b0debef257750d4d020e9dad38aa
+  version: latest
 ```
 
-Each selected skill must live at `skills/<name>/SKILL.md` in its source repository.
-Install, update, and sync derive this path from the skill name; catalog path fields
-are not used for installation, and paths are not stored in the manifest.
-Tracked sources without selected skills use `skills: []`; local sources omit
-`version`.
+Choose a version with `clime skills install owner/repo@<version>`:
 
-Use `--manifest <path>` with any `clime skills` command to read and save a different
-installed-skills manifest:
+| Version | Behavior |
+| --- | --- |
+| `latest` | Highest stable semver tag; falls back to a prerelease, then default-branch HEAD if no semver tags exist. |
+| Branch, e.g. `main` | Follows the branch's current commit. |
+| Tag or commit, e.g. `v1.2.3` | Pins installation and sync to that revision. |
+| Range, e.g. `v1` or `v1.2` | Selects the highest matching semver tag. |
+
+Installing without a version uses the saved version, or `latest` for a new source. `latest`, tag names, and branch names stay unchanged in the manifest.
+
+- **Install and sync** check branches and `latest` remotely; cached tags and commits work offline.
+- **Update** follows saved branches and `latest`, and moves pinned versions to latest. Unchanged installed revisions are skipped.
+- **Custom manifests:** use `clime skills sync --manifest ./skills.yaml`; `--manifest` works with every `clime skills` command. Local sources omit `version`.
+
+## Team setup
+
+Bootstrap CLI plugins from a shared manifest:
 
 ```sh
-clime skills list --manifest ./skills.yaml
-clime skills sync --manifest ./skills.yaml
+clime init                                 # saved source or built-in defaults
+clime init https://example.com/tools.yaml   # use and remember your team's manifest
 ```
 
-Relative manifest paths are resolved from the current directory. A missing file
-and its parent directories are created automatically. This option only changes
-the manifest location; skill installation directories and the source cache stay
-the same.
+Share a `skills.yaml` separately and apply it with `clime skills sync --manifest ./skills.yaml`.
 
-`latest`, tag names, and branch names are preserved in `version`; commit
-prefixes expand to full commit SHAs. For example, installing `owner/repo@main`
-saves `version: main`, and `owner/repo@latest` saves `version: latest`.
-
-Installing without a version uses the saved version. Tags and commits reuse the
-local cache without network access when available. Branches and `latest` are
-resolved remotely on every install, sync, and update.
-The manifest keeps the requested version, while the cache uses the resolved tag
-or commit. `latest` selects the newest stable release tag, with default-branch
-fallback when no release tags exist. Sync for branches and `latest` therefore
-requires access to the remote.
-
-With no saved version, install saves `latest`. An explicit `@latest` checks
-upstream. `update` without an explicit version follows a saved branch or `latest`;
-for tags and commits it selects latest. An update is refused when the new version no
-longer provides an installed skill, so skills are never removed implicitly.
-
-The last successfully installed revision is recorded in local cache metadata,
-separate from `skills.yaml`. Update compares it with the resolved revision and
-reports when skills are already up to date. A downloaded snapshot alone is not
-considered installed. Sync still restores the selected skill files.
-
-After a successful `install`, `update`, or `sync`, clime keeps the installed
-version's snapshot and deletes the other cached versions of that repository.
-Failed operations retain existing snapshots. Downgrading to a removed version
-fetches it again.
-
-For GitHub operations, clime checks `gh auth status --hostname github.com`.
-When logged in, it uses `gh` for version lookups, skill archive downloads,
-and release downloads. Skill installs, updates, and syncs share this behavior.
-If `gh` is unavailable or logged out, skills use Git and releases use HTTP.
-Other Git hosts continue to use Git. Downloads show progress during installation.
-
-## Shell Completions
-
-Generate shell completion scripts for bash, zsh, fish, or PowerShell:
+## More commands
 
 ```sh
-clime completion install           # auto-detect shell and install completions
-clime completion bash              # output bash completion script
-clime completion zsh               # output zsh completion script
+clime update                 # update clime itself
+clime completion install     # install shell completions
+clime help                   # browse commands
+clime <command> --help       # see options and examples
 ```
 
-Run **clime help** or **clime <command> --help** for full usage details.
+To build from source, install Go 1.25+ and run:
+
+```sh
+git clone https://github.com/git-hulk/clime.git
+cd clime
+make install
+```
