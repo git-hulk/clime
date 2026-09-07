@@ -19,18 +19,18 @@ const (
 // a nil Manager.Events is valid and reports nothing.
 type Events interface {
 	// SourceResolving fires before a source is resolved and materialized.
-	SourceResolving(verb Verb, src Source)
+	SourceResolving(verb Verb, source Source)
 	// SourceFailed fires when preparing a source fails, including an
 	// update refused because the new catalog drops an installed skill.
-	SourceFailed(verb Verb, src Source, err error)
+	SourceFailed(verb Verb, source Source, err error)
 	// SourceUpToDate fires when an update finds the source already at
 	// the requested version.
-	SourceUpToDate(src Source, version string)
+	SourceUpToDate(source Source, version string)
 	// SourceReady fires once a source is materialized and its skills are
 	// about to be installed. version is empty for local sources.
-	SourceReady(verb Verb, src Source, version string)
+	SourceReady(verb Verb, source Source, version string)
 	// SkillInstalling and SkillInstalled/SkillFailed bracket one skill.
-	SkillInstalling(verb Verb, name string, src Source)
+	SkillInstalling(verb Verb, name string, source Source)
 	SkillInstalled(verb Verb, name string, targets []string)
 	SkillFailed(verb Verb, name string, err error)
 	// NoTargets fires when no agent directory exists to install into.
@@ -50,8 +50,8 @@ type Manager struct {
 	Events   Events
 }
 
-func (v Verb) String() string {
-	switch v {
+func (verb Verb) String() string {
+	switch verb {
 	case VerbUpdate:
 		return "update"
 	case VerbSync:
@@ -72,7 +72,7 @@ func (NopEvents) NoTargets()                            {}
 
 // Open loads the manifest, opens the source store, and detects targets.
 func Open(events Events) (*Manager, error) {
-	manifest, err := LoadManifest()
+	manifest, err := LoadManifest("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load skills manifest: %w", err)
 	}
@@ -87,40 +87,40 @@ func Open(events Events) (*Manager, error) {
 	return &Manager{Manifest: manifest, Store: store, Targets: targets, Events: events}, nil
 }
 
-func (m *Manager) events() Events {
-	if m.Events == nil {
+func (manager *Manager) events() Events {
+	if manager.Events == nil {
 		return NopEvents{}
 	}
-	return m.Events
+	return manager.Events
 }
 
 // Fetch materializes a source and reads its catalog, for browsing before
 // an install. With no query, it uses the manifest's locked version when
 // available, otherwise latest. It reports no events; wrap it with
 // caller-side progress.
-func (m *Manager) Fetch(src Source) (*Snapshot, *Catalog, error) {
-	if src.Query == "" && !src.IsLocal() {
-		if record, ok := m.Manifest.GetSource(src); ok && record.Version != "" {
-			src = src.WithQuery(record.Version)
+func (manager *Manager) Fetch(source Source) (*Snapshot, *Catalog, error) {
+	if source.Query == "" && !source.IsLocal() {
+		if record, ok := manager.Manifest.GetSource(source); ok && record.Version != "" {
+			source = source.WithQuery(record.Version)
 		}
 	}
-	snap, err := m.Store.Snapshot(src)
+	snapshot, err := manager.Store.Snapshot(source)
 	if err != nil {
 		return nil, nil, err
 	}
-	catalog, err := snap.Catalog()
+	catalog, err := snapshot.Catalog()
 	if err != nil {
 		return nil, nil, err
 	}
-	return snap, catalog, nil
+	return snapshot, catalog, nil
 }
 
 // Install installs the given catalog entries from a snapshot into every
 // target and records them in the manifest. It continues past per-skill
 // failures and returns how many skills succeeded. After successful
 // installation, other cached versions of the source are removed.
-func (m *Manager) Install(snap *Snapshot, entries []Entry) (int, error) {
-	return m.install(VerbInstall, snap, entries)
+func (manager *Manager) Install(snapshot *Snapshot, entries []Entry) (int, error) {
+	return manager.install(VerbInstall, snapshot, entries)
 }
 
 // Update moves one source to the version its query resolves to (latest
@@ -129,49 +129,49 @@ func (m *Manager) Install(snap *Snapshot, entries []Entry) (int, error) {
 // installed skill, so a skill is never removed implicitly. After successful
 // installation, other cached versions of the source are removed. Returns how
 // many skills changed; zero with a nil error means already up to date.
-func (m *Manager) Update(src Source) (int, error) {
-	ev := m.events()
-	installed := m.Manifest.SkillsFrom(src)
+func (manager *Manager) Update(source Source) (int, error) {
+	events := manager.events()
+	installed := manager.Manifest.SkillsFrom(source)
 	if len(installed) == 0 {
-		return 0, fmt.Errorf("no skills installed from %s", src.Repo)
+		return 0, fmt.Errorf("no skills installed from %s", source.Repo)
 	}
 
-	ev.SourceResolving(VerbUpdate, src)
-	snap, err := m.Store.Snapshot(src)
+	events.SourceResolving(VerbUpdate, source)
+	snapshot, err := manager.Store.Snapshot(source)
 	if err != nil {
-		ev.SourceFailed(VerbUpdate, src, err)
+		events.SourceFailed(VerbUpdate, source, err)
 		return 0, err
 	}
 
-	if current, _ := m.Manifest.GetSource(src); snap.Version != "" && snap.Version == current.Version {
-		ev.SourceUpToDate(src, snap.Version)
+	if current, _ := manager.Manifest.GetSource(source); snapshot.Version != "" && snapshot.Version == current.Version {
+		events.SourceUpToDate(source, snapshot.Version)
 		return 0, nil
 	}
 
-	catalog, err := snap.Catalog()
+	catalog, err := snapshot.Catalog()
 	if err != nil {
-		ev.SourceFailed(VerbUpdate, src, err)
+		events.SourceFailed(VerbUpdate, source, err)
 		return 0, err
 	}
 	entries := make([]Entry, 0, len(installed))
 	var missing []string
-	for _, s := range installed {
-		entry, ok := catalog.Find(s.Name)
+	for _, installedSkill := range installed {
+		entry, ok := catalog.Find(installedSkill.Name)
 		if !ok {
-			missing = append(missing, s.Name)
+			missing = append(missing, installedSkill.Name)
 			continue
 		}
 		entries = append(entries, entry)
 	}
 	if len(missing) > 0 {
 		err := fmt.Errorf("%s at %s no longer provides %s; uninstall them first to update",
-			src.Repo, DisplayVersion(snap.Version), strings.Join(missing, ", "))
-		ev.SourceFailed(VerbUpdate, src, err)
+			source.Repo, DisplayVersion(snapshot.Version), strings.Join(missing, ", "))
+		events.SourceFailed(VerbUpdate, source, err)
 		return 0, err
 	}
 
-	ev.SourceReady(VerbUpdate, src, snap.Version)
-	return m.install(VerbUpdate, snap, entries)
+	events.SourceReady(VerbUpdate, source, snapshot.Version)
+	return manager.install(VerbUpdate, snapshot, entries)
 }
 
 // Sync re-installs a source's skills at the version locked in the
@@ -179,53 +179,53 @@ func (m *Manager) Update(src Source) (int, error) {
 // re-installed. A source without a locked version is installed at latest
 // and the resolved version is recorded. After successful installation,
 // other cached versions of the source are removed.
-func (m *Manager) Sync(src Source) (int, error) {
-	ev := m.events()
-	installed := m.Manifest.SkillsFrom(src)
+func (manager *Manager) Sync(source Source) (int, error) {
+	events := manager.events()
+	installed := manager.Manifest.SkillsFrom(source)
 	if len(installed) == 0 {
-		return 0, fmt.Errorf("no skills installed from %s", src.Repo)
+		return 0, fmt.Errorf("no skills installed from %s", source.Repo)
 	}
 
-	locked := src
-	if record, ok := m.Manifest.GetSource(src); ok && record.Version != "" && !src.IsLocal() {
-		locked = src.WithQuery(record.Version)
+	locked := source
+	if record, ok := manager.Manifest.GetSource(source); ok && record.Version != "" && !source.IsLocal() {
+		locked = source.WithQuery(record.Version)
 	}
 
-	ev.SourceResolving(VerbSync, locked)
-	snap, err := m.Store.Snapshot(locked)
+	events.SourceResolving(VerbSync, locked)
+	snapshot, err := manager.Store.Snapshot(locked)
 	if err != nil {
-		ev.SourceFailed(VerbSync, locked, err)
+		events.SourceFailed(VerbSync, locked, err)
 		return 0, err
 	}
-	ev.SourceReady(VerbSync, src, snap.Version)
+	events.SourceReady(VerbSync, source, snapshot.Version)
 
 	entries := make([]Entry, 0, len(installed))
-	for _, s := range installed {
-		entries = append(entries, Entry{Name: s.Name, Path: s.Path})
+	for _, installedSkill := range installed {
+		entries = append(entries, Entry{Name: installedSkill.Name, Path: installedSkill.Path})
 	}
-	return m.install(VerbSync, snap, entries)
+	return manager.install(VerbSync, snapshot, entries)
 }
 
 // Uninstall removes one skill from every target and from the manifest,
 // returning the names of the targets it was removed from.
-func (m *Manager) Uninstall(name string) ([]string, error) {
-	if _, ok := m.Manifest.GetSkill(name); !ok {
+func (manager *Manager) Uninstall(name string) ([]string, error) {
+	if _, ok := manager.Manifest.GetSkill(name); !ok {
 		return nil, fmt.Errorf("skill %q is not installed", name)
 	}
 
 	var removed []string
-	for _, t := range m.Targets {
-		ok, err := t.Remove(name)
+	for _, target := range manager.Targets {
+		ok, err := target.Remove(name)
 		if err != nil {
 			return removed, err
 		}
 		if ok {
-			removed = append(removed, t.Name)
+			removed = append(removed, target.Name)
 		}
 	}
 
-	m.Manifest.RemoveSkill(name)
-	if err := m.Manifest.Save(); err != nil {
+	manager.Manifest.RemoveSkill(name)
+	if err := manager.Manifest.Save(); err != nil {
 		return removed, fmt.Errorf("skill removed but failed to update manifest: %w", err)
 	}
 	return removed, nil
@@ -234,19 +234,19 @@ func (m *Manager) Uninstall(name string) ([]string, error) {
 // install installs each entry in turn, reporting failures as they happen,
 // and returns how many succeeded. It prunes other snapshots only after
 // every entry has been installed and saved to the manifest.
-func (m *Manager) install(verb Verb, snap *Snapshot, entries []Entry) (int, error) {
+func (manager *Manager) install(verb Verb, snapshot *Snapshot, entries []Entry) (int, error) {
 	failed := 0
 	for _, entry := range entries {
-		if err := m.installEntry(verb, snap, entry); err != nil {
-			m.events().SkillFailed(verb, entry.Name, err)
+		if err := manager.installEntry(verb, snapshot, entry); err != nil {
+			manager.events().SkillFailed(verb, entry.Name, err)
 			failed++
 		}
 	}
 	if failed > 0 {
 		return len(entries) - failed, fmt.Errorf("%d skill(s) failed", failed)
 	}
-	if len(entries) > 0 && snap.Version != "" && len(m.Targets) > 0 {
-		if err := m.Store.prune(snap.Source, snap.Version); err != nil {
+	if len(entries) > 0 && snapshot.Version != "" && len(manager.Targets) > 0 {
+		if err := manager.Store.prune(snapshot.Source, snapshot.Version); err != nil {
 			return len(entries), fmt.Errorf("skills installed but failed to remove old snapshots: %w", err)
 		}
 	}
@@ -256,11 +256,11 @@ func (m *Manager) install(verb Verb, snap *Snapshot, entries []Entry) (int, erro
 // installEntry writes one skill from the snapshot into every target and
 // records it in the manifest. The resolved version is recorded on the
 // source, so a floating query is never persisted.
-func (m *Manager) installEntry(verb Verb, snap *Snapshot, entry Entry) error {
-	ev := m.events()
-	ev.SkillInstalling(verb, entry.Name, snap.Source)
+func (manager *Manager) installEntry(verb Verb, snapshot *Snapshot, entry Entry) error {
+	events := manager.events()
+	events.SkillInstalling(verb, entry.Name, snapshot.Source)
 
-	files, err := snap.SkillFiles(entry.Path)
+	files, err := snapshot.SkillFiles(entry.Path)
 	if err != nil {
 		return fmt.Errorf("failed to %s skill %q: %w", verb, entry.Name, err)
 	}
@@ -268,30 +268,30 @@ func (m *Manager) installEntry(verb Verb, snap *Snapshot, entry Entry) error {
 		return fmt.Errorf("skill %q is missing required SKILL.md file", entry.Name)
 	}
 
-	if len(m.Targets) == 0 {
-		ev.NoTargets()
+	if len(manager.Targets) == 0 {
+		events.NoTargets()
 		return nil
 	}
 	var targets []string
-	for _, t := range m.Targets {
-		if err := t.Install(entry.Name, files); err != nil {
+	for _, target := range manager.Targets {
+		if err := target.Install(entry.Name, files); err != nil {
 			return fmt.Errorf("failed to %s skill %q: %w", verb, entry.Name, err)
 		}
-		targets = append(targets, t.Name)
+		targets = append(targets, target.Name)
 	}
 
-	if snap.Version != "" {
-		m.Manifest.SetSourceVersion(snap.Source, snap.Version)
+	if snapshot.Version != "" {
+		manager.Manifest.SetSourceVersion(snapshot.Source, snapshot.Version)
 	}
-	m.Manifest.AddSkill(InstalledSkill{
+	manager.Manifest.AddSkill(InstalledSkill{
 		Name:   entry.Name,
-		Source: snap.Source.Repo,
+		Source: snapshot.Source.Repo,
 		Path:   entry.Path,
 	})
-	if err := m.Manifest.Save(); err != nil {
+	if err := manager.Manifest.Save(); err != nil {
 		return fmt.Errorf("skill installed but failed to update manifest: %w", err)
 	}
 
-	ev.SkillInstalled(verb, entry.Name, targets)
+	events.SkillInstalled(verb, entry.Name, targets)
 	return nil
 }

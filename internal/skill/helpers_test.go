@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // gitIn runs a git command in dir and returns its trimmed output.
@@ -15,9 +17,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
-	}
+	require.NoError(t, err, "git %v: %s", args, out)
 	return strings.TrimSpace(string(out))
 }
 
@@ -32,12 +32,8 @@ func createTestGitRepo(t *testing.T, skillPath string, files map[string]string) 
 
 	for relPath, content := range files {
 		fullPath := filepath.Join(dir, skillPath, relPath)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
 	}
 
 	gitIn(t, dir, "add", "-A")
@@ -58,18 +54,12 @@ func checkoutVersion(t *testing.T, dir string) string {
 	cmd = exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = dir
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git rev-parse HEAD in %s failed: %v", dir, err)
-	}
+	require.NoError(t, err)
 	return strings.TrimSpace(string(out))
 }
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 }

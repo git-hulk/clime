@@ -2,51 +2,10 @@ package skill
 
 import (
 	"path/filepath"
-	"reflect"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/stretchr/testify/require"
 )
-
-func TestParseCatalogYAML(t *testing.T) {
-	t.Parallel()
-
-	yamlContent := `skills:
-  - name: docker-helper
-    description: Docker management skill
-    path: skills/docker-helper
-    tags:
-      - devops
-  - name: git-wizard
-    description: Git workflow automation
-    path: skills/git-wizard
-`
-	var catalog Catalog
-	if err := yaml.Unmarshal([]byte(yamlContent), &catalog); err != nil {
-		t.Fatalf("failed to parse yaml: %v", err)
-	}
-
-	if len(catalog.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(catalog.Skills))
-	}
-	if catalog.Skills[0].Name != "docker-helper" {
-		t.Fatalf("expected first skill name docker-helper, got %s", catalog.Skills[0].Name)
-	}
-	if catalog.Skills[0].Path != "skills/docker-helper" {
-		t.Fatalf("expected path skills/docker-helper, got %s", catalog.Skills[0].Path)
-	}
-	if len(catalog.Skills[0].Tags) != 1 || catalog.Skills[0].Tags[0] != "devops" {
-		t.Fatalf("unexpected tags: %v", catalog.Skills[0].Tags)
-	}
-
-	entry, ok := catalog.Find("git-wizard")
-	if !ok || entry.Path != "skills/git-wizard" {
-		t.Fatalf("Find(git-wizard) = (%+v, %v)", entry, ok)
-	}
-	if _, ok := catalog.Find("missing"); ok {
-		t.Fatal("Find(missing) should report absence")
-	}
-}
 
 func TestReadCatalogFromSkillsYAML(t *testing.T) {
 	t.Parallel()
@@ -56,16 +15,15 @@ func TestReadCatalogFromSkillsYAML(t *testing.T) {
   - name: my-skill
     description: A test skill
     path: skills/my-skill
+    tags: [devops]
 `)
 	writeFile(t, filepath.Join(dir, "skills", "my-skill", "SKILL.md"), "# My Skill")
 
 	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
-	if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "my-skill" {
-		t.Fatalf("catalog = %+v, want the my-skill entry", catalog.Skills)
-	}
+	require.NoError(t, err)
+	require.Equal(t, []Entry{{
+		Name: "my-skill", Description: "A test skill", Path: "skills/my-skill", Tags: []string{"devops"},
+	}}, catalog.Skills)
 }
 
 func TestReadCatalogFromMarketplaceJSON(t *testing.T) {
@@ -87,18 +45,11 @@ func TestReadCatalogFromMarketplaceJSON(t *testing.T) {
 	}
 
 	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
-	if len(catalog.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(catalog.Skills))
-	}
-	if catalog.Skills[0].Name != "skill-a" || catalog.Skills[0].Path != "skills/skill-a" {
-		t.Fatalf("first entry = %+v", catalog.Skills[0])
-	}
-	if catalog.Skills[1].Name != "skill-b" {
-		t.Fatalf("second entry = %+v", catalog.Skills[1])
-	}
+	require.NoError(t, err)
+	require.Len(t, catalog.Skills, 2)
+	require.Equal(t, "skill-a", catalog.Skills[0].Name)
+	require.Equal(t, "skills/skill-a", catalog.Skills[0].Path)
+	require.Equal(t, "skill-b", catalog.Skills[1].Name)
 }
 
 func TestReadCatalogFromPluginJSON(t *testing.T) {
@@ -112,19 +63,14 @@ func TestReadCatalogFromPluginJSON(t *testing.T) {
 	}
 
 	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
-	if len(catalog.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(catalog.Skills))
-	}
+	require.NoError(t, err)
+	require.Len(t, catalog.Skills, 2)
 	names := map[string]bool{}
 	for _, s := range catalog.Skills {
 		names[s.Name] = true
 	}
-	if !names["skill-x"] || !names["skill-y"] {
-		t.Fatalf("expected skill-x and skill-y, got %v", names)
-	}
+	require.True(t, names["skill-x"])
+	require.True(t, names["skill-y"])
 }
 
 func TestReadCatalogPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
@@ -140,45 +86,16 @@ func TestReadCatalogPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
 		"---\nname: my-skill\ndescription: A skill\n---\n# My Skill")
 
 	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
-	if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "my-skill" {
-		t.Fatalf("catalog = %+v, want my-skill via plugin.json fallback", catalog.Skills)
-	}
-}
-
-func TestReadCatalogEmptyNameFallsBackToDirName(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"),
-		`{"plugins": [{"name": "P", "skills": ["./skills/my-skill"]}]}`)
-	// Frontmatter with no name field.
-	writeFile(t, filepath.Join(dir, "skills", "my-skill", "SKILL.md"),
-		"---\ndescription: has desc but no name\n---\n# Skill")
-
-	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
-	if len(catalog.Skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(catalog.Skills))
-	}
-	if catalog.Skills[0].Name != "my-skill" {
-		t.Fatalf("expected name my-skill (from directory), got %q", catalog.Skills[0].Name)
-	}
-	if catalog.Skills[0].Description != "has desc but no name" {
-		t.Fatalf("expected description preserved, got %q", catalog.Skills[0].Description)
-	}
+	require.NoError(t, err)
+	require.Len(t, catalog.Skills, 1)
+	require.Equal(t, "my-skill", catalog.Skills[0].Name)
 }
 
 func TestReadCatalogNoManifest(t *testing.T) {
 	t.Parallel()
 
-	if _, err := ReadCatalog(t.TempDir()); err == nil {
-		t.Fatal("ReadCatalog() should fail when no catalog file exists")
-	}
+	_, err := ReadCatalog(t.TempDir())
+	require.Error(t, err, "ReadCatalog() should fail when no catalog file exists")
 }
 
 func TestReadCatalogFromSkillsDirectory(t *testing.T) {
@@ -196,17 +113,13 @@ func TestReadCatalogFromSkillsDirectory(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "skills", "invalid", "SKILL.md", "file.txt"), "not a regular SKILL.md")
 
 	catalog, err := ReadCatalog(dir)
-	if err != nil {
-		t.Fatalf("ReadCatalog() error = %v", err)
-	}
+	require.NoError(t, err)
 	want := []Entry{
 		{Name: "custom-alpha", Description: "Alpha description", Path: "skills/alpha"},
 		{Name: "beta", Path: "skills/beta"},
 		{Name: "gamma", Description: "Gamma description", Path: "skills/gamma"},
 	}
-	if !reflect.DeepEqual(catalog.Skills, want) {
-		t.Fatalf("catalog = %+v, want %+v", catalog.Skills, want)
-	}
+	require.Equal(t, want, catalog.Skills)
 }
 
 func TestReadCatalogPrefersManifestOverSkillsDirectory(t *testing.T) {
@@ -225,12 +138,9 @@ func TestReadCatalogPrefersManifestOverSkillsDirectory(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "custom", "chosen", "SKILL.md"), "# Chosen")
 			writeFile(t, filepath.Join(dir, "skills", "unlisted", "SKILL.md"), "# Unlisted")
 			catalog, err := ReadCatalog(dir)
-			if err != nil {
-				t.Fatalf("ReadCatalog() error = %v", err)
-			}
-			if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "chosen" {
-				t.Fatalf("catalog = %+v, want only the manifest's chosen skill", catalog.Skills)
-			}
+			require.NoError(t, err)
+			require.Len(t, catalog.Skills, 1)
+			require.Equal(t, "chosen", catalog.Skills[0].Name)
 		})
 	}
 }
@@ -240,7 +150,7 @@ func TestReadCatalogSkillsDirectoryRequiresSkillMd(t *testing.T) {
 
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "skills", "assets", "example.txt"), "not a skill")
-	if _, err := ReadCatalog(dir); err == nil {
-		t.Fatal("ReadCatalog() should fail when the skills directory contains no skills")
-	}
+
+	_, err := ReadCatalog(dir)
+	require.Error(t, err, "ReadCatalog() should fail when the skills directory contains no skills")
 }

@@ -39,15 +39,15 @@ type versionRefs interface {
 //
 // The result is always a concrete tag or full commit SHA, never a floating
 // value.
-func resolveVersion(src versionRefs, query string) (string, error) {
+func resolveVersion(source versionRefs, query string) (string, error) {
 	if fullSHAPattern.MatchString(query) {
 		return query, nil
 	}
 	if query == "" || query == "latest" {
-		return resolveLatest(src)
+		return resolveLatest(source)
 	}
 
-	tags, err := src.remoteTags()
+	tags, err := source.remoteTags()
 	if err != nil {
 		return "", err
 	}
@@ -57,36 +57,36 @@ func resolveVersion(src versionRefs, query string) (string, error) {
 		}
 	}
 	if semverQueryPattern.MatchString(query) {
-		if v := maxSemverTag(tags, query); v != "" {
-			return v, nil
+		if version := maxSemverTag(tags, query); version != "" {
+			return version, nil
 		}
-		return "", fmt.Errorf("no version of %s matches query %q", src, query)
+		return "", fmt.Errorf("no version of %s matches query %q", source, query)
 	}
-	if sha, ok, err := src.remoteRefCommit("refs/heads/" + query); err != nil {
+	if sha, ok, err := source.remoteRefCommit("refs/heads/" + query); err != nil {
 		return "", err
 	} else if ok {
 		return sha, nil
 	}
 	if shortSHAPattern.MatchString(query) {
-		return src.expandShortSHA(query)
+		return source.expandShortSHA(query)
 	}
-	return "", fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, src)
+	return "", fmt.Errorf("unknown version %q for %s: no matching tag, branch, or commit", query, source)
 }
 
-func resolveLatest(src versionRefs) (string, error) {
-	tags, err := src.remoteTags()
+func resolveLatest(source versionRefs) (string, error) {
+	tags, err := source.remoteTags()
 	if err != nil {
 		return "", err
 	}
-	if v := maxSemverTag(tags, ""); v != "" {
-		return v, nil
+	if version := maxSemverTag(tags, ""); version != "" {
+		return version, nil
 	}
-	sha, ok, err := src.remoteRefCommit("HEAD")
+	sha, ok, err := source.remoteRefCommit("HEAD")
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", src)
+		return "", fmt.Errorf("cannot resolve latest version of %s: no semver tags and no HEAD", source)
 	}
 	return sha, nil
 }
@@ -97,7 +97,7 @@ func resolveLatest(src versionRefs) (string, error) {
 // are not valid semver (including those missing the "v" prefix) are ignored,
 // as in Go modules.
 func maxSemverTag(tags []string, query string) string {
-	var best, bestPre string
+	var best, bestPrerelease string
 	for _, tag := range tags {
 		if !semver.IsValid(tag) {
 			continue
@@ -113,8 +113,8 @@ func maxSemverTag(tags []string, query string) string {
 			}
 		}
 		if semver.Prerelease(tag) != "" {
-			if bestPre == "" || semver.Compare(tag, bestPre) > 0 {
-				bestPre = tag
+			if bestPrerelease == "" || semver.Compare(tag, bestPrerelease) > 0 {
+				bestPrerelease = tag
 			}
 			continue
 		}
@@ -125,23 +125,23 @@ func maxSemverTag(tags []string, query string) string {
 	if best != "" {
 		return best
 	}
-	return bestPre
+	return bestPrerelease
 }
 
-// lsRemote runs git ls-remote with the given arguments followed by the
+// listRemoteRefs runs git ls-remote with the given arguments followed by the
 // source's clone URL and any ref patterns, returning non-empty output lines.
-func lsRemote(src Source, flags []string, refs ...string) ([]string, error) {
+func listRemoteRefs(source Source, flags []string, refs ...string) ([]string, error) {
 	args := append([]string{"ls-remote"}, flags...)
-	args = append(args, src.CloneURL())
+	args = append(args, source.CloneURL())
 	args = append(args, refs...)
 	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.Output()
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list remote refs of %s: %w", src.Repo, err)
+		return nil, fmt.Errorf("failed to list remote refs of %s: %w", source.Repo, err)
 	}
 	var lines []string
-	for line := range strings.SplitSeq(string(out), "\n") {
+	for line := range strings.SplitSeq(string(output), "\n") {
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
 		}
@@ -151,8 +151,8 @@ func lsRemote(src Source, flags []string, refs ...string) ([]string, error) {
 
 // remoteTags lists the remote's tag names, with annotated-tag peel entries
 // ("^{}") folded into their tag.
-func (src Source) remoteTags() ([]string, error) {
-	lines, err := lsRemote(src, []string{"--tags"})
+func (source Source) remoteTags() ([]string, error) {
+	lines, err := listRemoteRefs(source, []string{"--tags"})
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +174,8 @@ func (src Source) remoteTags() ([]string, error) {
 
 // remoteRefCommit returns the commit SHA the given ref points to, and
 // whether the remote advertises that ref.
-func (src Source) remoteRefCommit(ref string) (string, bool, error) {
-	lines, err := lsRemote(src, nil, ref)
+func (source Source) remoteRefCommit(ref string) (string, bool, error) {
+	lines, err := listRemoteRefs(source, nil, ref)
 	if err != nil {
 		return "", false, err
 	}
@@ -190,8 +190,8 @@ func (src Source) remoteRefCommit(ref string) (string, bool, error) {
 
 // expandShortSHA expands a commit SHA prefix to the full SHA when it
 // uniquely matches one of the remote's advertised refs.
-func (src Source) expandShortSHA(prefix string) (string, error) {
-	lines, err := lsRemote(src, nil)
+func (source Source) expandShortSHA(prefix string) (string, error) {
+	lines, err := listRemoteRefs(source, nil)
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +208,7 @@ func (src Source) expandShortSHA(prefix string) (string, error) {
 			return sha, nil
 		}
 	case 0:
-		return "", fmt.Errorf("commit %q does not match any advertised ref of %s; use the full 40-character SHA", prefix, src.Repo)
+		return "", fmt.Errorf("commit %q does not match any advertised ref of %s; use the full 40-character SHA", prefix, source.Repo)
 	}
-	return "", fmt.Errorf("commit %q is ambiguous in %s", prefix, src.Repo)
+	return "", fmt.Errorf("commit %q is ambiguous in %s", prefix, source.Repo)
 }

@@ -67,15 +67,15 @@ func splitSource(raw string) (repo, query string) {
 
 // splitQuery splits "repo@query" at the last "@" appearing after the last
 // "/". A trailing "@" is kept as part of the repository.
-func splitQuery(s string) (repo, query string) {
-	at := strings.LastIndex(s, "@")
-	if at <= strings.LastIndex(s, "/") {
-		return s, ""
+func splitQuery(text string) (repo, query string) {
+	separator := strings.LastIndex(text, "@")
+	if separator <= strings.LastIndex(text, "/") {
+		return text, ""
 	}
-	if q := s[at+1:]; q != "" {
-		return s[:at], q
+	if query := text[separator+1:]; query != "" {
+		return text[:separator], query
 	}
-	return s, ""
+	return text, ""
 }
 
 func isRemoteURL(repo string) bool {
@@ -88,55 +88,55 @@ func looksLikeLocalPath(repo string) bool {
 }
 
 // IsLocal reports whether the source names an existing local directory.
-func (s Source) IsLocal() bool {
-	if isRemoteURL(s.Repo) {
+func (source Source) IsLocal() bool {
+	if isRemoteURL(source.Repo) {
 		return false
 	}
-	info, err := os.Stat(s.Repo)
+	info, err := os.Stat(source.Repo)
 	return err == nil && info.IsDir()
 }
 
 // Dir returns the absolute path of a local source.
-func (s Source) Dir() (string, error) {
-	dir, err := filepath.Abs(s.Repo)
+func (source Source) Dir() (string, error) {
+	dir, err := filepath.Abs(source.Repo)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve local source path %q: %w", s.Repo, err)
+		return "", fmt.Errorf("failed to resolve local source path %q: %w", source.Repo, err)
 	}
 	return dir, nil
 }
 
 // CloneURL converts an "owner/repo" shorthand to a git clone URL. Full
 // URLs (any scheme, or SSH git@) and local paths are returned as-is.
-func (s Source) CloneURL() string {
-	if isRemoteURL(s.Repo) || looksLikeLocalPath(s.Repo) {
-		return s.Repo
+func (source Source) CloneURL() string {
+	if isRemoteURL(source.Repo) || looksLikeLocalPath(source.Repo) {
+		return source.Repo
 	}
-	return fmt.Sprintf("https://github.com/%s.git", s.Repo)
+	return fmt.Sprintf("https://github.com/%s.git", source.Repo)
 }
 
 // Equal reports whether two sources refer to the same repository.
 // Version queries are per-install state, not part of a source's identity.
-func (s Source) Equal(o Source) bool {
-	return sameRepo(s.Repo, o.Repo)
+func (source Source) Equal(other Source) bool {
+	return sameRepo(source.Repo, other.Repo)
 }
 
 // sameRepo is the one definition of source identity: repository names are
 // case-insensitive on GitHub and other major hosts.
-func sameRepo(a, b string) bool {
-	return strings.EqualFold(a, b)
+func sameRepo(left, right string) bool {
+	return strings.EqualFold(left, right)
 }
 
 // WithQuery returns the source pinned to the given version query.
-func (s Source) WithQuery(query string) Source {
-	return Source{Repo: s.Repo, Query: query}
+func (source Source) WithQuery(query string) Source {
+	return Source{Repo: source.Repo, Query: query}
 }
 
 // String renders the source as "repo" or "repo@query".
-func (s Source) String() string {
-	if s.Query == "" {
-		return s.Repo
+func (source Source) String() string {
+	if source.Query == "" {
+		return source.Repo
 	}
-	return s.Repo + "@" + s.Query
+	return source.Repo + "@" + source.Query
 }
 
 // DisplayVersion shortens a full commit SHA for display; tags are shown
@@ -151,9 +151,9 @@ func DisplayVersion(version string) string {
 	return version
 }
 
-func isHex(s string) bool {
-	for _, r := range s {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+func isHex(text string) bool {
+	for _, character := range text {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') && (character < 'A' || character > 'F') {
 			return false
 		}
 	}

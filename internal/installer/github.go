@@ -31,19 +31,19 @@ func NewGitHubInstaller(repo string) *GitHubInstaller {
 	}
 }
 
-func (g *GitHubInstaller) Install(name string) (string, error) {
-	release, err := g.fetchLatest(g.Repo)
+func (installer *GitHubInstaller) Install(name string) (string, error) {
+	release, err := installer.fetchLatest(installer.Repo)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch latest release for %s: %w", g.Repo, err)
+		return "", fmt.Errorf("failed to fetch latest release for %s: %w", installer.Repo, err)
 	}
 
-	repoName := g.repoBaseName()
-	asset, err := g.findAsset(release, repoName)
+	repoName := installer.repoBaseName()
+	asset, err := installer.findAsset(release, repoName)
 	if err != nil {
 		return "", err
 	}
 
-	installDir, err := g.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return "", err
 	}
@@ -52,27 +52,27 @@ func (g *GitHubInstaller) Install(name string) (string, error) {
 	}
 
 	destPath := filepath.Join(installDir, plugin.BinPrefix+name)
-	binaryContent, err := g.downloadBinary(asset.BrowserDownloadURL, repoName)
+	binaryContent, err := installer.downloadBinary(asset.BrowserDownloadURL, repoName)
 	if err != nil {
 		return "", fmt.Errorf("failed to install plugin: %w", err)
 	}
-	if err := g.writeBinary(destPath, binaryContent); err != nil {
+	if err := installer.writeBinary(destPath, binaryContent); err != nil {
 		return "", fmt.Errorf("failed to install plugin: %w", err)
 	}
 
 	return release.Version(), nil
 }
 
-func (g *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
-	release, err := g.fetchLatest(g.Repo)
+func (installer *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
+	release, err := installer.fetchLatest(installer.Repo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest release for %s: %w", g.Repo, err)
+		return nil, fmt.Errorf("failed to fetch latest release for %s: %w", installer.Repo, err)
 	}
 
 	latest := release.Version()
 	result := &UpdateResult{
 		Name:           name,
-		Source:         g.Repo,
+		Source:         installer.Repo,
 		CurrentVersion: current.Version,
 		LatestVersion:  latest,
 		Updated:        false,
@@ -82,18 +82,18 @@ func (g *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 		return result, nil
 	}
 
-	repoName := g.repoBaseName()
-	asset, err := g.findAsset(release, repoName)
+	repoName := installer.repoBaseName()
+	asset, err := installer.findAsset(release, repoName)
 	if err != nil {
 		return nil, err
 	}
 
-	binaryContent, err := g.downloadBinary(asset.BrowserDownloadURL, repoName)
+	binaryContent, err := installer.downloadBinary(asset.BrowserDownloadURL, repoName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
 
-	installDir, err := g.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (g *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 	}
 
 	destPath := filepath.Join(installDir, plugin.BinPrefix+name)
-	if err := g.writeBinary(destPath, binaryContent); err != nil {
+	if err := installer.writeBinary(destPath, binaryContent); err != nil {
 		return nil, fmt.Errorf("failed to update plugin: %w", err)
 	}
 
@@ -111,29 +111,29 @@ func (g *GitHubInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 	return result, nil
 }
 
-func (g *GitHubInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
+func (installer *GitHubInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
 	return removePluginBinary(name)
 }
 
-func (g *GitHubInstaller) DetectVersion(name string) string {
-	release, err := g.fetchLatest(g.Repo)
+func (installer *GitHubInstaller) DetectVersion(name string) string {
+	release, err := installer.fetchLatest(installer.Repo)
 	if err != nil {
 		return plugin.VersionLatest
 	}
 	return release.Version()
 }
 
-func (g *GitHubInstaller) PluginType() string { return plugin.SourceTypeGitHub }
-func (g *GitHubInstaller) Source() string     { return g.Repo }
+func (installer *GitHubInstaller) PluginType() string { return plugin.SourceTypeGitHub }
+func (installer *GitHubInstaller) Source() string     { return installer.Repo }
 
-func (g *GitHubInstaller) repoBaseName() string {
-	if i := strings.LastIndex(g.Repo, "/"); i >= 0 {
-		return g.Repo[i+1:]
+func (installer *GitHubInstaller) repoBaseName() string {
+	if i := strings.LastIndex(installer.Repo, "/"); i >= 0 {
+		return installer.Repo[i+1:]
 	}
-	return g.Repo
+	return installer.Repo
 }
 
-func (g *GitHubInstaller) findAsset(release *githubrelease.Release, repoName string) (*githubrelease.Asset, error) {
+func (installer *GitHubInstaller) findAsset(release *githubrelease.Release, repoName string) (*githubrelease.Asset, error) {
 	pattern := fmt.Sprintf("%s_", repoName)
 	return release.FindTarGzAsset(pattern, runtime.GOOS, runtime.GOARCH)
 }

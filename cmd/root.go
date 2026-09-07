@@ -10,11 +10,11 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:               "clime",
-	Short:             "Unified CLI manager that lets you install, discover, and update CLI plugins from one place",
-	Long:              "As more agents move from MCP servers to CLIs, it gets hard to track what's installed and keep things up to date." +
-						"\nFor organizations with many internal tools, there's often no single place for employees to discover and download them."+
-						"\nclime solves these problems by providing a unified CLI manager that lets you install, discover, and update CLI plugins from one place.",
+	Use:   "clime",
+	Short: "Unified CLI manager that lets you install, discover, and update CLI plugins from one place",
+	Long: "As more agents move from MCP servers to CLIs, it gets hard to track what's installed and keep things up to date." +
+		"\nFor organizations with many internal tools, there's often no single place for employees to discover and download them." +
+		"\nclime solves these problems by providing a unified CLI manager that lets you install, discover, and update CLI plugins from one place.",
 	SilenceErrors:     true,
 	SilenceUsage:      true,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -34,15 +34,15 @@ var builtinCommands = map[string]bool{
 func Execute() error {
 	// Before Cobra handles args, check if the subcommand is a plugin
 	if len(os.Args) > 1 {
-		sub := os.Args[1]
-		if !builtinCommands[sub] && !strings.HasPrefix(sub, "-") && !strings.HasPrefix(sub, "__") {
-			if p, found := plugin.Find(sub); found {
-				plugin.Exec(p, os.Args[2:])
+		subcommand := os.Args[1]
+		if !builtinCommands[subcommand] && !strings.HasPrefix(subcommand, "-") && !strings.HasPrefix(subcommand, "__") {
+			if binaryPath, found := plugin.Find(subcommand); found {
+				plugin.Exec(binaryPath, os.Args[2:])
 				// Exec replaces the process; reaching here means it failed
-				fmt.Fprintf(os.Stderr, "failed to execute plugin: %s\n", p)
+				fmt.Fprintf(os.Stderr, "Failed to execute plugin: %s\n", binaryPath)
 				os.Exit(1)
 			}
-			return fmt.Errorf("unknown command %q for \"clime\"", sub)
+			return fmt.Errorf("unknown command %q for \"clime\"", subcommand)
 		}
 	}
 
@@ -66,13 +66,13 @@ func registerPlugins() {
 	for _, cmd := range rootCmd.Commands() {
 		cmd.GroupID = "builtin"
 	}
-	for _, p := range plugins {
-		short := p.Name + " plugin"
-		if p.Description != "" {
-			short = p.Description
+	for _, discoveredPlugin := range plugins {
+		short := discoveredPlugin.Name + " plugin"
+		if discoveredPlugin.Description != "" {
+			short = discoveredPlugin.Description
 		}
 		rootCmd.AddCommand(&cobra.Command{
-			Use:                p.Name,
+			Use:                discoveredPlugin.Name,
 			Short:              short,
 			GroupID:            "plugin",
 			DisableFlagParsing: true,

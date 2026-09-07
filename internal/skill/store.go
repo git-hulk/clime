@@ -40,35 +40,35 @@ func OpenStore() (*Store, error) {
 	return &Store{Root: filepath.Join(home, ".clime", "sources")}, nil
 }
 
-// Snapshot materializes src at the version its query resolves to (latest
+// Snapshot materializes source at the version its query resolves to (latest
 // when it carries none). A concrete version already in cache is returned
 // without network access; floating queries (latest, a semver line, a
 // branch) always resolve remotely because only resolved versions are
 // cached. Local sources are used in place without cloning.
-func (st *Store) Snapshot(src Source) (*Snapshot, error) {
-	if src.IsLocal() {
-		if src.Query != "" {
-			return nil, fmt.Errorf("version %q is not supported for local path %q", src.Query, src.Repo)
+func (store *Store) Snapshot(source Source) (*Snapshot, error) {
+	if source.IsLocal() {
+		if source.Query != "" {
+			return nil, fmt.Errorf("version %q is not supported for local path %q", source.Query, source.Repo)
 		}
-		dir, err := src.Dir()
+		dir, err := source.Dir()
 		if err != nil {
 			return nil, err
 		}
-		return &Snapshot{Source: src, Dir: dir}, nil
+		return &Snapshot{Source: source, Dir: dir}, nil
 	}
 
-	query := src.Query
+	query := source.Query
 	if query == "" {
 		query = "latest"
 	}
-	base := st.repoDir(src)
+	base := store.repoDir(source)
 	if dir := versionDir(base, query); dirExists(dir) {
-		return &Snapshot{Source: src, Dir: dir, Version: query}, nil
+		return &Snapshot{Source: source, Dir: dir, Version: query}, nil
 	}
-	repo := src.githubRepo()
+	repo := source.githubRepo()
 	if repo != "" {
-		st.ghAuthOnce.Do(func() { st.ghAuthed = githubcli.Authenticated() })
-		if !st.ghAuthed {
+		store.ghAuthOnce.Do(func() { store.ghAuthed = githubcli.Authenticated() })
+		if !store.ghAuthed {
 			repo = ""
 		}
 	}
@@ -77,7 +77,7 @@ func (st *Store) Snapshot(src Source) (*Snapshot, error) {
 	if repo != "" {
 		resolved, err = resolveVersion(&githubSource{Source: Source{Repo: repo}}, query)
 	} else {
-		resolved, err = resolveVersion(src, query)
+		resolved, err = resolveVersion(source, query)
 	}
 	if err != nil {
 		return nil, err
@@ -85,25 +85,25 @@ func (st *Store) Snapshot(src Source) (*Snapshot, error) {
 	dir := versionDir(base, resolved)
 	if !dirExists(dir) {
 		if repo != "" {
-			err = downloadGitHubArchive(repo, resolved, dir, st.Progress)
+			err = downloadGitHubArchive(repo, resolved, dir, store.Progress)
 		} else {
-			err = cloneAtVersion(src, resolved, dir, st.Progress)
+			err = cloneAtVersion(source, resolved, dir, store.Progress)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch %s at %s: %w", src.Repo, resolved, err)
+			return nil, fmt.Errorf("failed to fetch %s at %s: %w", source.Repo, resolved, err)
 		}
 	}
-	return &Snapshot{Source: src, Dir: dir, Version: resolved}, nil
+	return &Snapshot{Source: source, Dir: dir, Version: resolved}, nil
 }
 
 // Remove deletes every cached version of the source.
-func (st *Store) Remove(src Source) error {
-	return os.RemoveAll(st.repoDir(src))
+func (store *Store) Remove(source Source) error {
+	return os.RemoveAll(store.repoDir(source))
 }
 
 // prune removes a source's cached snapshots except the installed version.
-func (st *Store) prune(src Source, version string) error {
-	base := st.repoDir(src)
+func (store *Store) prune(source Source, version string) error {
+	base := store.repoDir(source)
 	parent := filepath.Dir(base)
 	entries, err := os.ReadDir(parent)
 	if err != nil {
@@ -127,14 +127,14 @@ func (st *Store) prune(src Source, version string) error {
 
 // repoDir returns the base cache path for a source repository; version
 // directories live beside it, keyed by versionDir.
-func (st *Store) repoDir(src Source) string {
-	name := src.Repo
+func (store *Store) repoDir(source Source) string {
+	name := source.Repo
 	name = strings.TrimPrefix(name, "https://")
 	name = strings.TrimPrefix(name, "http://")
 	name = strings.TrimPrefix(name, "git@")
 	name = strings.TrimSuffix(name, ".git")
 	name = strings.ReplaceAll(name, ":", "/")
-	return filepath.Join(st.Root, name)
+	return filepath.Join(store.Root, name)
 }
 
 // versionDir returns the immutable cache directory for one version of a
@@ -149,18 +149,18 @@ func dirExists(path string) bool {
 }
 
 // Catalog reads the skills this snapshot offers.
-func (s *Snapshot) Catalog() (*Catalog, error) {
-	catalog, err := ReadCatalog(s.Dir)
+func (snapshot *Snapshot) Catalog() (*Catalog, error) {
+	catalog, err := ReadCatalog(snapshot.Dir)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", s.Source.Repo, err)
+		return nil, fmt.Errorf("%s: %w", snapshot.Source.Repo, err)
 	}
 	return catalog, nil
 }
 
 // SkillFiles reads all files under one skill's path, keyed by path
 // relative to it. A path naming a single file yields that file alone.
-func (s *Snapshot) SkillFiles(path string) (map[string][]byte, error) {
-	root := filepath.Join(s.Dir, path)
+func (snapshot *Snapshot) SkillFiles(path string) (map[string][]byte, error) {
+	root := filepath.Join(snapshot.Dir, path)
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, fmt.Errorf("skill path %q not found: %w", path, err)
@@ -176,21 +176,21 @@ func (s *Snapshot) SkillFiles(path string) (map[string][]byte, error) {
 		return files, nil
 	}
 
-	err = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+	err = filepath.Walk(root, func(filePath string, fileInfo os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if fi.IsDir() {
-			if fi.Name() == ".git" {
+		if fileInfo.IsDir() {
+			if fileInfo.Name() == ".git" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, err := filepath.Rel(root, p)
+		rel, err := filepath.Rel(root, filePath)
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ func (s *Snapshot) SkillFiles(path string) (map[string][]byte, error) {
 // branch, or commit SHA) into dir. Tags and branches are cloned directly;
 // commit SHAs are fetched into an empty repository to avoid downloading
 // the default branch first.
-func cloneAtVersion(src Source, version, dir string, progress func(string)) error {
+func cloneAtVersion(source Source, version, dir string, progress func(string)) error {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
@@ -218,10 +218,10 @@ func cloneAtVersion(src Source, version, dir string, progress func(string)) erro
 		if progress != nil {
 			args = append(args, "--progress")
 		}
-		cmd := exec.Command("git", append(args, src.CloneURL(), dir)...)
-		if out, err := runGitProgress(cmd, progress); err != nil {
+		cmd := exec.Command("git", append(args, source.CloneURL(), dir)...)
+		if output, err := runGitProgress(cmd, progress); err != nil {
 			os.RemoveAll(dir)
-			return fmt.Errorf("git clone failed: %w\n%s", err, out)
+			return fmt.Errorf("git clone failed: %w\n%s", err, output)
 		}
 		return nil
 	}
@@ -231,7 +231,7 @@ func cloneAtVersion(src Source, version, dir string, progress func(string)) erro
 	}
 	for _, args := range [][]string{
 		{"init"},
-		{"remote", "add", "origin", src.CloneURL()},
+		{"remote", "add", "origin", source.CloneURL()},
 		{"fetch", "--depth", "1", "origin", version},
 		{"checkout", "--detach", "FETCH_HEAD"},
 	} {
@@ -242,9 +242,9 @@ func cloneAtVersion(src Source, version, dir string, progress func(string)) erro
 		}
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		if out, err := runGitProgress(cmd, report); err != nil {
+		if output, err := runGitProgress(cmd, report); err != nil {
 			os.RemoveAll(dir)
-			return fmt.Errorf("failed to check out version %q: %w\n%s", version, err, out)
+			return fmt.Errorf("failed to check out version %q: %w\n%s", version, err, output)
 		}
 	}
 	return nil
@@ -258,25 +258,25 @@ type gitProgress struct {
 	report func(string)
 }
 
-func (p *gitProgress) Write(data []byte) (int, error) {
-	p.output.Write(data)
-	if p.report != nil {
-		for _, b := range data {
-			if b == '\r' || b == '\n' {
-				p.flush()
+func (progressWriter *gitProgress) Write(data []byte) (int, error) {
+	progressWriter.output.Write(data)
+	if progressWriter.report != nil {
+		for _, character := range data {
+			if character == '\r' || character == '\n' {
+				progressWriter.flush()
 			} else {
-				p.line.WriteByte(b)
+				progressWriter.line.WriteByte(character)
 			}
 		}
 	}
 	return len(data), nil
 }
 
-func (p *gitProgress) flush() {
-	if line := strings.TrimSpace(p.line.String()); line != "" {
-		p.report(line)
+func (progressWriter *gitProgress) flush() {
+	if line := strings.TrimSpace(progressWriter.line.String()); line != "" {
+		progressWriter.report(line)
 	}
-	p.line.Reset()
+	progressWriter.line.Reset()
 }
 
 func runGitProgress(cmd *exec.Cmd, report func(string)) (string, error) {

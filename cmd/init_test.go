@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterPluginsByTags(t *testing.T) {
@@ -59,13 +61,9 @@ func TestFilterPluginsByTags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := plugin.FilterByTags(plugins, tt.tags)
-			if len(got) != len(tt.wantName) {
-				t.Fatalf("got %d plugins, want %d", len(got), len(tt.wantName))
-			}
+			require.Len(t, got, len(tt.wantName))
 			for i, p := range got {
-				if p.Name != tt.wantName[i] {
-					t.Errorf("plugin[%d] = %q, want %q", i, p.Name, tt.wantName[i])
-				}
+				assert.Equal(t, tt.wantName[i], p.Name)
 			}
 		})
 	}

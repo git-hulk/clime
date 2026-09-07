@@ -33,10 +33,11 @@ var (
 	skillsActionRunner = runSkillsSourceAction
 
 	skillsInstallForce bool
+	skillsManifestPath string
 )
 
 // verbUI maps a skill verb to the wording the progress output uses.
-var verbUI = map[skill.Verb]struct{ resolving, present, past, prep string }{
+var verbUI = map[skill.Verb]struct{ resolving, present, past, preposition string }{
 	skill.VerbInstall: {"Preparing", "Installing", "Installed", "at"},
 	skill.VerbUpdate:  {"Resolving", "Updating", "Updated", "to"},
 	skill.VerbSync:    {"Preparing", "Syncing", "Synced", "at"},
@@ -53,6 +54,8 @@ type installCandidate struct {
 }
 
 func init() {
+	skillsCmd.PersistentFlags().StringVar(&skillsManifestPath, "manifest", "",
+		"path to the installed-skills manifest (default ~/.clime/skills.yaml)")
 	skillsInstallCmd.Flags().BoolVarP(&skillsInstallForce, "force", "f", false,
 		"when installing from a repo, also (re)install skills that are already installed and overwrite them")
 	skillsCmd.AddCommand(skillsListCmd)
@@ -77,7 +80,7 @@ var skillsListCmd = &cobra.Command{
 	Long: "List installed skills and their sources, 10 per page in an interactive " +
 		"terminal. Piped output includes every skill.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadManifest(skillsManifestPath)
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -96,12 +99,12 @@ var skillsListCmd = &cobra.Command{
 
 		headers := []string{"NAME", "SOURCE", "VERSION"}
 		var rows [][]string
-		for _, s := range manifest.Skills {
-			record, _ := manifest.GetSource(skill.Source{Repo: s.Source})
-			rows = append(rows, []string{s.Name, s.Source, skill.DisplayVersion(record.Version)})
+		for _, installedSkill := range manifest.Skills {
+			record, _ := manifest.GetSource(skill.Source{Repo: installedSkill.Source})
+			rows = append(rows, []string{installedSkill.Name, installedSkill.Source, skill.DisplayVersion(record.Version)})
 		}
-		slices.SortStableFunc(rows, func(a, b []string) int {
-			return strings.Compare(a[0], b[0])
+		slices.SortStableFunc(rows, func(left, right []string) int {
+			return strings.Compare(left[0], right[0])
 		})
 		if !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
 			printTable(headers, rows)
@@ -126,7 +129,7 @@ func printSkillPages(headers []string, rows [][]string) error {
 			options = append(options, "Previous page")
 		}
 		options = append(options, "Done")
-		idx, err := selectPrompt(prompt.SelectConfig{
+		selectedIndex, err := selectPrompt(prompt.SelectConfig{
 			Label:       fmt.Sprintf("Page %d/%d", start/skillsPageSize+1, (len(rows)-1)/skillsPageSize+1),
 			Options:     options,
 			LeftOption:  "Previous page",
@@ -138,7 +141,7 @@ func printSkillPages(headers []string, rows [][]string) error {
 		if err != nil {
 			return err
 		}
-		switch options[idx] {
+		switch options[selectedIndex] {
 		case "Next page":
 			start = end
 		case "Previous page":
@@ -151,14 +154,14 @@ func printSkillPages(headers []string, rows [][]string) error {
 }
 
 func printTable(headers []string, rows [][]string) {
-	colWidths := make([]int, len(headers))
-	for i, h := range headers {
-		colWidths[i] = len(h)
+	columnWidths := make([]int, len(headers))
+	for i, header := range headers {
+		columnWidths[i] = len(header)
 	}
 	for _, row := range rows {
 		for i, cell := range row {
-			if len(cell) > colWidths[i] {
-				colWidths[i] = len(cell)
+			if len(cell) > columnWidths[i] {
+				columnWidths[i] = len(cell)
 			}
 		}
 	}
@@ -167,20 +170,20 @@ func printTable(headers []string, rows [][]string) {
 	const indent = "  "
 
 	fmt.Print(indent)
-	for i, h := range headers {
+	for i, header := range headers {
 		if i > 0 {
 			fmt.Print(strings.Repeat(" ", gap))
 		}
-		fmt.Print(uicli.BoldColor.Sprintf("%-*s", colWidths[i], h))
+		fmt.Print(uicli.BoldColor.Sprintf("%-*s", columnWidths[i], header))
 	}
 	fmt.Println()
 
 	fmt.Print(indent)
-	for i, w := range colWidths {
+	for i, width := range columnWidths {
 		if i > 0 {
 			fmt.Print(strings.Repeat(" ", gap))
 		}
-		fmt.Print(strings.Repeat("-", w))
+		fmt.Print(strings.Repeat("-", width))
 	}
 	fmt.Println()
 
@@ -190,7 +193,7 @@ func printTable(headers []string, rows [][]string) {
 			if i > 0 {
 				fmt.Print(strings.Repeat(" ", gap))
 			}
-			fmt.Printf("%-*s", colWidths[i], cell)
+			fmt.Printf("%-*s", columnWidths[i], cell)
 		}
 		fmt.Println()
 	}
@@ -200,7 +203,7 @@ var skillsInstallCmd = &cobra.Command{
 	Use:   "install [owner/repo[@version]|path]",
 	Short: "Install skills from a GitHub repository or local path",
 	Long: "Install skills from a GitHub repository or local path. A repository source " +
-		"without a version uses its locked version from ~/.clime/skills.yaml, reusing " +
+		"without a version uses its locked version from the selected manifest, reusing " +
 		"the local cache when available. Without a lock, it resolves latest. Use " +
 		"owner/repo@latest or `clime skills update` to check for a newer version. " +
 		"A Go-style version suffix is resolved like `go get`: owner/repo@latest " +
@@ -209,7 +212,7 @@ var skillsInstallCmd = &cobra.Command{
 		"pins that revision.",
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadManifest(skillsManifestPath)
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -234,7 +237,7 @@ var skillsUpdateCmd = &cobra.Command{
 		"owner/repo@v1.2.3 or owner/repo@v1. The set of installed skills is preserved.",
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadManifest(skillsManifestPath)
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -242,32 +245,32 @@ var skillsUpdateCmd = &cobra.Command{
 		if len(args) > 0 {
 			return runSkillsSourceAction(manifest, args[0], actionUpdate)
 		}
-		mgr, err := newSkillsManager(manifest)
+		manager, err := newSkillsManager(manifest)
 		if err != nil {
 			return err
 		}
-		return forEachInstalledSource(mgr, skill.VerbUpdate, mgr.Update)
+		return forEachInstalledSource(manager, skill.VerbUpdate, manager.Update)
 	},
 }
 
 var skillsSyncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Reinstall skills at the versions locked in the manifest",
-	Long: "Reinstall every skill recorded in ~/.clime/skills.yaml from its source at the " +
+	Long: "Reinstall every skill recorded in the selected manifest from its source at the " +
 		"locked version, without looking for a newer one. Versions already cached under " +
 		"~/.clime/sources are applied without network access. Use `clime skills update` " +
 		"to move a source to a newer version.",
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadManifest(skillsManifestPath)
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
-		mgr, err := newSkillsManager(manifest)
+		manager, err := newSkillsManager(manifest)
 		if err != nil {
 			return err
 		}
-		return forEachInstalledSource(mgr, skill.VerbSync, mgr.Sync)
+		return forEachInstalledSource(manager, skill.VerbSync, manager.Sync)
 	},
 }
 
@@ -276,7 +279,7 @@ var skillsUninstallCmd = &cobra.Command{
 	Short: "Uninstall a previously installed skill",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manifest, err := skill.LoadManifest()
+		manifest, err := skill.LoadManifest(skillsManifestPath)
 		if err != nil {
 			return fmt.Errorf("failed to load skills manifest: %w", err)
 		}
@@ -314,11 +317,11 @@ func newSkillsManager(manifest *skill.Manifest) (*skill.Manager, error) {
 	}, nil
 }
 
-func startSpinner(msg string) *uicli.Spinner {
+func startSpinner(message string) *uicli.Spinner {
 	return uicli.NewSpinner().
 		WithStyle(uicli.SpinnerDots).
 		WithColor(uicli.CyanColor).
-		WithMessage(msg).
+		WithMessage(message).
 		Start()
 }
 
@@ -331,60 +334,60 @@ func fetchProgress(spinner *uicli.Spinner) func(string) {
 	}
 }
 
-// finish ends the active spinner with fn, tolerating events that arrive
+// finish ends the active spinner with finishSpinner, tolerating events that arrive
 // without a preceding start.
-func (u *skillsUI) finish(fn func(*uicli.Spinner)) {
-	if u.spinner != nil {
-		fn(u.spinner)
-		u.spinner = nil
+func (ui *skillsUI) finish(finishSpinner func(*uicli.Spinner)) {
+	if ui.spinner != nil {
+		finishSpinner(ui.spinner)
+		ui.spinner = nil
 	}
 }
 
-func (u *skillsUI) SourceResolving(verb skill.Verb, src skill.Source) {
-	u.spinner = startSpinner(fmt.Sprintf("%s %s...", verbUI[verb].resolving, src))
+func (ui *skillsUI) SourceResolving(verb skill.Verb, skillSource skill.Source) {
+	ui.spinner = startSpinner(fmt.Sprintf("%s %s...", verbUI[verb].resolving, skillSource))
 }
 
-func (u *skillsUI) SourceFailed(verb skill.Verb, src skill.Source, err error) {
-	u.finish(func(s *uicli.Spinner) { s.Error(fmt.Sprintf("Failed to %s %s", verb, src.Repo)) })
+func (ui *skillsUI) SourceFailed(verb skill.Verb, skillSource skill.Source, err error) {
+	ui.finish(func(spinner *uicli.Spinner) { spinner.Error(fmt.Sprintf("Failed to %s %s", verb, skillSource.Repo)) })
 }
 
-func (u *skillsUI) SourceUpToDate(src skill.Source, version string) {
-	u.finish(func(s *uicli.Spinner) {
-		s.Success(fmt.Sprintf("%s is already at %s", src.Repo, skill.DisplayVersion(version)))
+func (ui *skillsUI) SourceUpToDate(skillSource skill.Source, version string) {
+	ui.finish(func(spinner *uicli.Spinner) {
+		spinner.Success(fmt.Sprintf("Source %s is already at %s", skillSource.Repo, skill.DisplayVersion(version)))
 	})
 }
 
-func (u *skillsUI) SourceReady(verb skill.Verb, src skill.Source, version string) {
-	label := fmt.Sprintf("%s %s", verbUI[verb].present, src.Repo)
+func (ui *skillsUI) SourceReady(verb skill.Verb, skillSource skill.Source, version string) {
+	label := fmt.Sprintf("%s %s", verbUI[verb].present, skillSource.Repo)
 	if version != "" {
-		label = fmt.Sprintf("%s %s %s", label, verbUI[verb].prep, skill.DisplayVersion(version))
+		label = fmt.Sprintf("%s %s %s", label, verbUI[verb].preposition, skill.DisplayVersion(version))
 	}
-	u.finish(func(s *uicli.Spinner) { s.Success(label) })
+	ui.finish(func(spinner *uicli.Spinner) { spinner.Success(label) })
 }
 
-func (u *skillsUI) SkillInstalling(verb skill.Verb, name string, src skill.Source) {
-	u.spinner = startSpinner(fmt.Sprintf("%s skill %q from %s...", verbUI[verb].present, name, src.Repo))
+func (ui *skillsUI) SkillInstalling(verb skill.Verb, name string, skillSource skill.Source) {
+	ui.spinner = startSpinner(fmt.Sprintf("%s skill %q from %s...", verbUI[verb].present, name, skillSource.Repo))
 }
 
-func (u *skillsUI) SkillInstalled(verb skill.Verb, name string, targets []string) {
-	u.finish(func(s *uicli.Spinner) {
-		s.Success(fmt.Sprintf("%s skill %q to %s", verbUI[verb].past, name, strings.Join(targets, ", ")))
+func (ui *skillsUI) SkillInstalled(verb skill.Verb, name string, targets []string) {
+	ui.finish(func(spinner *uicli.Spinner) {
+		spinner.Success(fmt.Sprintf("%s skill %q to %s", verbUI[verb].past, name, strings.Join(targets, ", ")))
 	})
 }
 
-func (u *skillsUI) SkillFailed(verb skill.Verb, name string, err error) {
-	u.finish(func(s *uicli.Spinner) {
+func (ui *skillsUI) SkillFailed(verb skill.Verb, name string, err error) {
+	ui.finish(func(spinner *uicli.Spinner) {
 		if errors.Is(err, os.ErrNotExist) {
-			s.Stop()
+			spinner.Stop()
 			return
 		}
-		s.Error(fmt.Sprintf("Failed to %s skill %q", verb, name))
+		spinner.Error(fmt.Sprintf("Failed to %s skill %q", verb, name))
 	})
 	terminal.Errorf("Failed to %s %q: %v", verb, name, err)
 }
 
-func (u *skillsUI) NoTargets() {
-	u.finish(func(s *uicli.Spinner) { s.Stop() })
+func (ui *skillsUI) NoTargets() {
+	ui.finish(func(spinner *uicli.Spinner) { spinner.Stop() })
 	terminal.Warning("No skill directories were installed.")
 }
 
@@ -400,8 +403,8 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 	}
 
 	options := make([]string, 0, len(sources)+2)
-	for _, src := range sources {
-		options = append(options, src.Repo)
+	for _, skillSource := range sources {
+		options = append(options, skillSource.Repo)
 	}
 	options = append(options, pluginSkillsOption, newRepoOption)
 	showSourceSpacer := true
@@ -411,7 +414,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 		} else {
 			showSourceSpacer = true
 		}
-		idx, err := selectPrompt(prompt.SelectConfig{
+		selectedIndex, err := selectPrompt(prompt.SelectConfig{
 			Label:   "Select a skill source",
 			Options: options,
 		})
@@ -423,7 +426,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 			return err
 		}
 
-		if options[idx] == pluginSkillsOption {
+		if options[selectedIndex] == pluginSkillsOption {
 			err := installFromPluginSkills(manifest)
 			if errors.Is(err, prompt.ErrBack) {
 				showSourceSpacer = false
@@ -432,7 +435,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 			return err
 		}
 
-		if options[idx] == newRepoOption {
+		if options[selectedIndex] == newRepoOption {
 			repo, err := inputPrompt("Enter repository (owner/repo)")
 			if err != nil {
 				return err
@@ -440,7 +443,7 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 			return skillsActionRunner(manifest, repo, actionBrowseInstall)
 		}
 
-		repo := options[idx]
+		repo := options[selectedIndex]
 		showActionSpacer := true
 		for {
 			action, err := pickSourceAction(repo, showActionSpacer)
@@ -463,20 +466,20 @@ func runInteractiveSkillsInstall(manifest *skill.Manifest) error {
 }
 
 func runSkillsSourceAction(manifest *skill.Manifest, source string, action sourceAction) error {
-	src, err := skill.ParseSource(source)
+	skillSource, err := skill.ParseSource(source)
 	if err != nil {
 		return err
 	}
 
 	switch action {
 	case actionRemoveSource:
-		return removeSource(manifest, src)
+		return removeSource(manifest, skillSource)
 	case actionUpdate:
-		mgr, err := newSkillsManager(manifest)
+		manager, err := newSkillsManager(manifest)
 		if err != nil {
 			return err
 		}
-		_, err = mgr.Update(src)
+		_, err = manager.Update(skillSource)
 		return err
 	default:
 		return installFromRepo(manifest, source, false)
@@ -493,7 +496,7 @@ func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 	if showSpacer {
 		fmt.Println()
 	}
-	idx, err := selectPrompt(prompt.SelectConfig{
+	selectedIndex, err := selectPrompt(prompt.SelectConfig{
 		Label:   fmt.Sprintf("Action for %s", repo),
 		Options: options,
 	})
@@ -501,7 +504,7 @@ func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 		return 0, err
 	}
 
-	switch idx {
+	switch selectedIndex {
 	case 1:
 		return actionUpdate, nil
 	case 2:
@@ -512,10 +515,10 @@ func pickSourceAction(repo string, showSpacer bool) (sourceAction, error) {
 }
 
 // removeSource uninstalls all skills from the given source and removes it from the manifest.
-func removeSource(manifest *skill.Manifest, src skill.Source) error {
+func removeSource(manifest *skill.Manifest, skillSource skill.Source) error {
 	var names []string
-	for _, s := range manifest.SkillsFrom(src) {
-		names = append(names, s.Name)
+	for _, installedSkill := range manifest.SkillsFrom(skillSource) {
+		names = append(names, installedSkill.Name)
 	}
 
 	fmt.Println()
@@ -525,42 +528,42 @@ func removeSource(manifest *skill.Manifest, src skill.Source) error {
 		}
 	}
 
-	manifest.RemoveSource(src)
+	manifest.RemoveSource(skillSource)
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("failed to update manifest: %w", err)
 	}
 
 	store, err := skill.OpenStore()
 	if err == nil {
-		err = store.Remove(src)
+		err = store.Remove(skillSource)
 	}
 	if err != nil {
-		terminal.Warningf("Failed to remove cached versions of %s: %v", src.Repo, err)
+		terminal.Warningf("Failed to remove cached versions of %s: %v", skillSource.Repo, err)
 	}
 
 	if len(names) == 0 {
-		terminal.Successf("Removed source %s.", src.Repo)
+		terminal.Successf("Removed source %s.", skillSource.Repo)
 	}
 	return nil
 }
 
-// forEachInstalledSource applies fn to every source with installed skills,
+// forEachInstalledSource applies applySource to every source with installed skills,
 // continuing past failures so one unreachable source does not block the
-// rest. fn returns how many skills it changed; the run ends with a summary.
-func forEachInstalledSource(mgr *skill.Manager, verb skill.Verb, fn func(skill.Source) (int, error)) error {
-	sources := mgr.Manifest.InstalledSources()
+// rest. applySource returns how many skills it changed; the run ends with a summary.
+func forEachInstalledSource(manager *skill.Manager, verb skill.Verb, applySource func(skill.Source) (int, error)) error {
+	sources := manager.Manifest.InstalledSources()
 	if len(sources) == 0 {
 		terminal.Warning("No skills installed.")
 		return nil
 	}
 
 	failed, changed := 0, 0
-	for _, src := range sources {
+	for _, skillSource := range sources {
 		fmt.Println()
-		n, err := fn(src)
-		changed += n
+		changedCount, err := applySource(skillSource)
+		changed += changedCount
 		if err != nil {
-			terminal.Errorf("Failed to %s %s: %v", verb, src.Repo, err)
+			terminal.Errorf("Failed to %s %s: %v", verb, skillSource.Repo, err)
 			failed++
 		}
 	}
@@ -582,22 +585,22 @@ func forEachInstalledSource(mgr *skill.Manager, verb skill.Verb, fn func(skill.S
 // which case they are included and their label is marked "(reinstall)".
 func selectInstallCandidates(repoSkills []skill.Entry, manifest *skill.Manifest, force bool) []installCandidate {
 	var candidates []installCandidate
-	for _, s := range repoSkills {
-		_, installed := manifest.GetSkill(s.Name)
+	for _, installedSkill := range repoSkills {
+		_, installed := manifest.GetSkill(installedSkill.Name)
 		if installed && !force {
 			continue
 		}
-		label := s.Name
-		if s.Description != "" {
-			label = fmt.Sprintf("%s — %s", s.Name, uicli.TruncateString(s.Description, 60))
+		label := installedSkill.Name
+		if installedSkill.Description != "" {
+			label = fmt.Sprintf("%s — %s", installedSkill.Name, uicli.TruncateString(installedSkill.Description, 60))
 		}
 		if installed {
 			label += " (reinstall)"
 		}
-		candidates = append(candidates, installCandidate{entry: s, label: label})
+		candidates = append(candidates, installCandidate{entry: installedSkill, label: label})
 	}
-	slices.SortStableFunc(candidates, func(a, b installCandidate) int {
-		return strings.Compare(a.entry.Name, b.entry.Name)
+	slices.SortStableFunc(candidates, func(left, right installCandidate) int {
+		return strings.Compare(left.entry.Name, right.entry.Name)
 	})
 	return candidates
 }
@@ -607,18 +610,18 @@ func selectInstallCandidates(repoSkills []skill.Entry, manifest *skill.Manifest,
 // in the list (instead of being filtered out) so they can be reinstalled and
 // overwritten.
 func installFromRepo(manifest *skill.Manifest, source string, force bool) error {
-	src, err := skill.ParseSource(source)
+	skillSource, err := skill.ParseSource(source)
 	if err != nil {
 		return err
 	}
-	mgr, err := newSkillsManager(manifest)
+	manager, err := newSkillsManager(manifest)
 	if err != nil {
 		return err
 	}
 
 	spinner := startSpinner(fmt.Sprintf("Fetching skills from %q...", source))
-	mgr.Store.Progress = fetchProgress(spinner)
-	snap, catalog, err := mgr.Fetch(src)
+	manager.Store.Progress = fetchProgress(spinner)
+	snapshot, catalog, err := manager.Fetch(skillSource)
 	if err != nil {
 		spinner.Error(fmt.Sprintf("Failed to fetch %q", source))
 		return fmt.Errorf("failed to fetch skills: %w", err)
@@ -630,7 +633,7 @@ func installFromRepo(manifest *skill.Manifest, source string, force bool) error 
 	spinner.Success(fmt.Sprintf("Found %d skill(s) in %q", len(catalog.Skills), source))
 
 	// Record the source so it appears in future interactive menus.
-	manifest.AddSource(src)
+	manifest.AddSource(skillSource)
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("failed to save skill source: %w", err)
 	}
@@ -642,12 +645,12 @@ func installFromRepo(manifest *skill.Manifest, source string, force bool) error 
 	}
 
 	options := make([]string, len(candidates))
-	for i, c := range candidates {
-		options[i] = c.label
+	for i, candidate := range candidates {
+		options[i] = candidate.label
 	}
 
 	fmt.Println()
-	selectedIdxs, err := multiSelectPrompt(prompt.SelectConfig{
+	selectedIndices, err := multiSelectPrompt(prompt.SelectConfig{
 		Label:    "Select skills to install (space to toggle, enter to confirm)",
 		Options:  options,
 		PageSize: skillsPageSize,
@@ -656,19 +659,19 @@ func installFromRepo(manifest *skill.Manifest, source string, force bool) error 
 		return err
 	}
 
-	if len(selectedIdxs) == 0 {
+	if len(selectedIndices) == 0 {
 		terminal.Info("No skills selected.")
 		return nil
 	}
 
-	entries := make([]skill.Entry, 0, len(selectedIdxs))
-	for _, idx := range selectedIdxs {
-		entries = append(entries, candidates[idx].entry)
+	entries := make([]skill.Entry, 0, len(selectedIndices))
+	for _, selectedIndex := range selectedIndices {
+		entries = append(entries, candidates[selectedIndex].entry)
 	}
 
 	// Per-skill failures are already reported through the progress events.
 	fmt.Println()
-	_, _ = mgr.Install(snap, entries)
+	_, _ = manager.Install(snapshot, entries)
 	return nil
 }
 
@@ -680,10 +683,10 @@ func uninstallByName(manifest *skill.Manifest, name string) error {
 	if err != nil {
 		return err
 	}
-	mgr := &skill.Manager{Manifest: manifest, Targets: targets}
+	manager := &skill.Manager{Manifest: manifest, Targets: targets}
 
 	spinner := startSpinner(fmt.Sprintf("Removing skill %q...", name))
-	removed, err := mgr.Uninstall(name)
+	removed, err := manager.Uninstall(name)
 	if err != nil {
 		spinner.Error(fmt.Sprintf("Failed to remove skill %q", name))
 		return fmt.Errorf("failed to remove skill %q: %w", name, err)
@@ -700,8 +703,8 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 	}
 
 	options := make([]string, len(manifest.Skills))
-	for i, s := range manifest.Skills {
-		options[i] = s.Name
+	for i, installedSkill := range manifest.Skills {
+		options[i] = installedSkill.Name
 	}
 	slices.Sort(options)
 
@@ -712,7 +715,7 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 		} else {
 			showSpacer = true
 		}
-		selectedIdxs, err := multiSelectPrompt(prompt.SelectConfig{
+		selectedIndices, err := multiSelectPrompt(prompt.SelectConfig{
 			Label:   "Select skills to uninstall (space to toggle, enter to confirm)",
 			Options: options,
 		})
@@ -724,15 +727,15 @@ func interactiveUninstall(manifest *skill.Manifest) error {
 			return err
 		}
 
-		if len(selectedIdxs) == 0 {
+		if len(selectedIndices) == 0 {
 			terminal.Info("No skills selected.")
 			return nil
 		}
 
 		// Collect names before uninstalling, since uninstallByName modifies manifest.Skills.
-		names := make([]string, len(selectedIdxs))
-		for i, idx := range selectedIdxs {
-			names[i] = options[idx]
+		names := make([]string, len(selectedIndices))
+		for i, selectedIndex := range selectedIndices {
+			names[i] = options[selectedIndex]
 		}
 
 		fmt.Println()

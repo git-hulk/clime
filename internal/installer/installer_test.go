@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseVersionOutput(t *testing.T) {
@@ -31,9 +33,7 @@ func TestParseVersionOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := parseVersionOutput(tt.output)
-			if got != tt.want {
-				t.Errorf("parseVersionOutput(%q) = %q, want %q", tt.output, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -84,20 +84,12 @@ func TestFromPlugin(t *testing.T) {
 			t.Parallel()
 			inst, err := FromPlugin(tt.plugin)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("FromPlugin() expected error")
-				}
+				require.Error(t, err, "FromPlugin() expected error")
 				return
 			}
-			if err != nil {
-				t.Fatalf("FromPlugin() error = %v", err)
-			}
-			if inst.PluginType() != tt.wantType {
-				t.Errorf("PluginType() = %q, want %q", inst.PluginType(), tt.wantType)
-			}
-			if inst.Source() != tt.wantSource {
-				t.Errorf("Source() = %q, want %q", inst.Source(), tt.wantSource)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantType, inst.PluginType())
+			assert.Equal(t, tt.wantSource, inst.Source())
 		})
 	}
 }
@@ -148,20 +140,12 @@ func TestFromManifest(t *testing.T) {
 			t.Parallel()
 			inst, err := FromManifest(tt.entry)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("FromManifest() expected error")
-				}
+				require.Error(t, err, "FromManifest() expected error")
 				return
 			}
-			if err != nil {
-				t.Fatalf("FromManifest() error = %v", err)
-			}
-			if inst.PluginType() != tt.wantType {
-				t.Errorf("PluginType() = %q, want %q", inst.PluginType(), tt.wantType)
-			}
-			if inst.Source() != tt.wantSource {
-				t.Errorf("Source() = %q, want %q", inst.Source(), tt.wantSource)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantType, inst.PluginType())
+			assert.Equal(t, tt.wantSource, inst.Source())
 		})
 	}
 }

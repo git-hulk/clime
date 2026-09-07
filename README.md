@@ -122,6 +122,19 @@ across pages. The numbered picker
 supports `n` and `p` for navigation. Piping `clime skills list` prints every skill.
 
 The manifest at `~/.clime/skills.yaml` records each source's locked version.
+Use `--manifest <path>` with any `clime skills` command to read and save a different
+installed-skills manifest:
+
+```sh
+clime skills list --manifest ./skills.yaml
+clime skills sync --manifest ./skills.yaml
+```
+
+Relative manifest paths are resolved from the current directory. A missing file
+and its parent directories are created automatically. This option only changes
+the manifest location; skill installation directories and the source cache stay
+the same.
+
 Installing without a version uses that lock and reuses the local cache without
 network access when available. If the locked version is not cached, it is fetched;
 if there is no lock, install resolves latest. An explicit `@latest` checks upstream.

@@ -4,26 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMultiSelectKeepsSelectionsAcrossPages(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "input")
-	if err := os.WriteFile(inputPath, []byte("p\n1\nn\n11\nn\n21\nn\np\np\np\n\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(inputPath, []byte("p\n1\nn\n11\nn\n21\nn\np\np\np\n\n"), 0o600))
 	input, err := os.Open(inputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer input.Close()
 	output, err := os.Create(filepath.Join(dir, "output"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer output.Close()
 	stdin, stdout := os.Stdin, os.Stdout
 	os.Stdin, os.Stdout = input, output
@@ -33,24 +28,16 @@ func TestMultiSelectKeepsSelectionsAcrossPages(t *testing.T) {
 		config.Options = append(config.Options, fmt.Sprintf("skill-%02d", i))
 	}
 	selected, err := MultiSelect(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(selected, []int{0, 10, 20}) {
-		t.Fatalf("selected = %v, want [0 10 20]", selected)
-	}
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 10, 20}, selected)
 	data, err := os.ReadFile(output.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for _, page := range strings.Split(string(data), "Pick skills")[1:] {
-		if count := strings.Count(page, "skill-"); count < 1 || count > 10 {
-			t.Fatalf("page has %d skills, want 1–10: %s", count, page)
-		}
+		count := strings.Count(page, "skill-")
+		require.GreaterOrEqual(t, count, 1)
+		require.LessOrEqual(t, count, 10)
 	}
 	for _, label := range []string{"Page 1/3", "Page 2/3", "Page 3/3"} {
-		if !strings.Contains(string(data), label) {
-			t.Fatalf("output missing %q", label)
-		}
+		require.Contains(t, string(data), label)
 	}
 }

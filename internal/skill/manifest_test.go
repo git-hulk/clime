@@ -3,77 +3,10 @@ package skill
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
-
-func TestAddSkill(t *testing.T) {
-	t.Parallel()
-	m := &Manifest{}
-
-	m.AddSkill(InstalledSkill{
-		Name:   "my-skill",
-		Source: "owner/repo",
-		Path:   "my-skill",
-	})
-	if len(m.Skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(m.Skills))
-	}
-
-	// Update existing skill.
-	m.AddSkill(InstalledSkill{
-		Name:   "my-skill",
-		Source: "owner/repo",
-		Path:   "my-skill/updated",
-	})
-	if len(m.Skills) != 1 {
-		t.Fatalf("expected 1 skill after update, got %d", len(m.Skills))
-	}
-	if m.Skills[0].Path != "my-skill/updated" {
-		t.Fatalf("expected path 'my-skill/updated', got %q", m.Skills[0].Path)
-	}
-}
-
-func TestRemoveSkill(t *testing.T) {
-	t.Parallel()
-	m := &Manifest{
-		Skills: []InstalledSkill{
-			{Name: "skill-a"},
-			{Name: "skill-b"},
-		},
-	}
-
-	if !m.RemoveSkill("skill-a") {
-		t.Fatal("expected RemoveSkill to return true")
-	}
-	if len(m.Skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(m.Skills))
-	}
-
-	if m.RemoveSkill("missing") {
-		t.Fatal("expected RemoveSkill to return false for missing skill")
-	}
-}
-
-func TestGetSkill(t *testing.T) {
-	t.Parallel()
-	m := &Manifest{
-		Skills: []InstalledSkill{{Name: "my-skill", Source: "owner/repo"}},
-	}
-
-	s, ok := m.GetSkill("my-skill")
-	if !ok {
-		t.Fatal("expected to find skill")
-	}
-	if s.Source != "owner/repo" {
-		t.Fatalf("expected source owner/repo, got %s", s.Source)
-	}
-
-	_, ok = m.GetSkill("missing")
-	if ok {
-		t.Fatal("expected not to find missing skill")
-	}
-}
 
 func TestSkillsFrom(t *testing.T) {
 	t.Parallel()
@@ -86,9 +19,9 @@ func TestSkillsFrom(t *testing.T) {
 	}
 
 	got := m.SkillsFrom(Source{Repo: "OWNER/REPO"})
-	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "beta" {
-		t.Fatalf("SkillsFrom() = %+v, want alpha and beta across spellings", got)
-	}
+	require.Len(t, got, 2)
+	require.Equal(t, "alpha", got[0].Name)
+	require.Equal(t, "beta", got[1].Name)
 }
 
 func TestSourcesAreCaseInsensitive(t *testing.T) {
@@ -97,16 +30,11 @@ func TestSourcesAreCaseInsensitive(t *testing.T) {
 
 	m.AddSource(Source{Repo: "AfterShip/Skills"})
 	m.AddSource(Source{Repo: "aftership/skills"})
-	if len(m.Sources) != 1 || m.Sources[0].Repo != "AfterShip/Skills" {
-		t.Fatalf("sources = %v, want first-seen spelling only", m.Sources)
-	}
+	require.Len(t, m.Sources, 1)
+	require.Equal(t, "AfterShip/Skills", m.Sources[0].Repo)
 
-	if !m.RemoveSource(Source{Repo: "AFTERSHIP/SKILLS"}) {
-		t.Fatal("RemoveSource should match case-insensitively")
-	}
-	if len(m.Sources) != 0 {
-		t.Fatalf("sources = %v, want empty", m.Sources)
-	}
+	require.True(t, m.RemoveSource(Source{Repo: "AFTERSHIP/SKILLS"}), "RemoveSource should match case-insensitively")
+	require.Empty(t, m.Sources)
 }
 
 func TestSetSourceVersion(t *testing.T) {
@@ -116,13 +44,11 @@ func TestSetSourceVersion(t *testing.T) {
 	m.SetSourceVersion(Source{Repo: "owner/repo"}, "v1.0.0")
 	m.SetSourceVersion(Source{Repo: "Owner/Repo"}, "v2.0.0")
 
-	if len(m.Sources) != 1 {
-		t.Fatalf("sources = %v, want one entry across spellings", m.Sources)
-	}
+	require.Len(t, m.Sources, 1)
 	record, ok := m.GetSource(Source{Repo: "OWNER/REPO"})
-	if !ok || record.Repo != "owner/repo" || record.Version != "v2.0.0" {
-		t.Fatalf("source = %+v, want first-seen spelling with the updated version", record)
-	}
+	require.True(t, ok)
+	require.Equal(t, "owner/repo", record.Repo)
+	require.Equal(t, "v2.0.0", record.Version)
 }
 
 func TestInstalledAndKnownSources(t *testing.T) {
@@ -139,25 +65,20 @@ func TestInstalledAndKnownSources(t *testing.T) {
 	}
 
 	installed := m.InstalledSources()
-	if len(installed) != 1 || installed[0].Repo != "owner/repo" {
-		t.Fatalf("InstalledSources() = %v, want the skills' shared source once", installed)
-	}
+	require.Len(t, installed, 1)
+	require.Equal(t, "owner/repo", installed[0].Repo)
 
 	known := m.KnownSources()
-	if len(known) != 2 || known[0].Repo != "owner/repo" || known[1].Repo != "tracked/only" {
-		t.Fatalf("KnownSources() = %v, want installed sources then tracked ones", known)
-	}
+	require.Len(t, known, 2)
+	require.Equal(t, "owner/repo", known[0].Repo)
+	require.Equal(t, "tracked/only", known[1].Repo)
 }
 
 func writeManifestFile(t *testing.T, home, content string) {
 	t.Helper()
 	dir := filepath.Join(home, ".clime")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "skills.yaml"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skills.yaml"), []byte(content), 0o644))
 }
 
 func TestLoadManifestNormalizesVersionedSources(t *testing.T) {
@@ -178,23 +99,17 @@ sources:
   - owner/repo@v1.2.3
 `)
 
-	m, err := LoadManifest()
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
+	m, err := LoadManifest("")
+	require.NoError(t, err)
 
-	if len(m.Sources) != 1 || m.Sources[0].Repo != "owner/repo" {
-		t.Fatalf("sources = %v, want [owner/repo]", m.Sources)
-	}
-	if m.Sources[0].Version != "v1.2.3" {
-		t.Fatalf("source version = %q, want the migrated pin %q", m.Sources[0].Version, "v1.2.3")
-	}
+	require.Len(t, m.Sources, 1)
+	require.Equal(t, "owner/repo", m.Sources[0].Repo)
+	require.Equal(t, "v1.2.3", m.Sources[0].Version)
 
 	for _, name := range []string{"pinned-skill", "legacy-skill"} {
 		s, _ := m.GetSkill(name)
-		if s.Source != "owner/repo" || s.LegacyVersion != "" {
-			t.Fatalf("%s = {source: %q, legacy version: %q}, want stripped source and no per-skill version", name, s.Source, s.LegacyVersion)
-		}
+		require.Equal(t, "owner/repo", s.Source)
+		require.Empty(t, s.LegacyVersion)
 	}
 }
 
@@ -210,16 +125,13 @@ func TestLoadManifestListsSkillSources(t *testing.T) {
     path: skills/sibling-skill
 `)
 
-	m, err := LoadManifest()
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	if len(m.Sources) != 1 {
-		t.Fatalf("sources = %v, want the skills' shared source listed once", m.Sources)
-	}
-	if record, ok := m.GetSource(Source{Repo: "owner/repo"}); !ok || record.Version != "" {
-		t.Fatalf("source = (%+v, %v), want listed without a version", record, ok)
-	}
+	m, err := LoadManifest("")
+	require.NoError(t, err)
+	require.Len(t, m.Sources, 1)
+
+	record, ok := m.GetSource(Source{Repo: "owner/repo"})
+	require.True(t, ok)
+	require.Empty(t, record.Version)
 }
 
 func TestLoadManifestBacksUpMigratedFile(t *testing.T) {
@@ -234,32 +146,24 @@ sources:
 `
 	writeManifestFile(t, home, legacy)
 
-	if _, err := LoadManifest(); err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
+	_, err := LoadManifest("")
+	require.NoError(t, err)
 
 	backup := filepath.Join(home, ".clime", "skills.yaml.bak")
 	got, err := os.ReadFile(backup)
-	if err != nil {
-		t.Fatalf("reading backup: %v", err)
-	}
-	if string(got) != legacy {
-		t.Fatalf("backup =\n%s\nwant the pre-migration manifest\n%s", got, legacy)
-	}
+	require.NoError(t, err)
+	require.Equal(t, legacy, string(got))
 
 	// A later migrating load keeps the original backup rather than
 	// replacing it with already-migrated content.
 	writeManifestFile(t, home, "skills:\n  - name: other\n    source: Owner/Repo@v2\n    path: skills/other\n")
-	if _, err := LoadManifest(); err != nil {
-		t.Fatalf("second LoadManifest() error = %v", err)
-	}
+
+	_, err = LoadManifest("")
+	require.NoError(t, err)
+
 	got, err = os.ReadFile(backup)
-	if err != nil {
-		t.Fatalf("reading backup after second load: %v", err)
-	}
-	if string(got) != legacy {
-		t.Fatalf("backup was overwritten:\n%s", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, legacy, string(got))
 }
 
 func TestLoadManifestParseErrorNamesFile(t *testing.T) {
@@ -267,11 +171,44 @@ func TestLoadManifestParseErrorNamesFile(t *testing.T) {
 	t.Setenv("HOME", home)
 	writeManifestFile(t, home, "skills: [oops\n")
 
-	_, err := LoadManifest()
-	if err == nil {
-		t.Fatal("LoadManifest() error = nil, want a parse error")
-	}
-	if !strings.Contains(err.Error(), filepath.Join(home, ".clime", "skills.yaml")) {
-		t.Fatalf("error = %v, want it to name the manifest path", err)
+	_, err := LoadManifest("")
+	require.ErrorContains(t, err, filepath.Join(home, ".clime", "skills.yaml"), "expected a parse error")
+}
+
+func TestCustomManifestPersistsToSelectedPath(t *testing.T) {
+	for _, initial := range []string{"", "skills: []\n", "sources:\n  - owner/repo@v1.2.3\n"} {
+		t.Run(initial, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Chdir(t.TempDir())
+			defaultPath := filepath.Join(home, ".clime", "skills.yaml")
+			defaultContent := "skills: []\nsources: []\n"
+			writeFile(t, defaultPath, defaultContent)
+			path := filepath.Join("config", "skills.yaml")
+			if initial != "" {
+				writeFile(t, path, initial)
+			}
+
+			manifest, err := LoadManifest(path)
+			require.NoError(t, err)
+			if initial == "sources:\n  - owner/repo@v1.2.3\n" {
+				backup, err := os.ReadFile(path + ".bak")
+				require.NoError(t, err)
+				require.Equal(t, initial, string(backup))
+				migrated, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Contains(t, string(migrated), "version: v1.2.3")
+			}
+			manifest.AddSkill(InstalledSkill{Name: "custom", Source: "owner/repo", Path: "skills/custom"})
+			require.NoError(t, manifest.Save())
+			reloaded, err := LoadManifest(path)
+			require.NoError(t, err)
+			installed, found := reloaded.GetSkill("custom")
+			require.True(t, found)
+			require.Equal(t, "skills/custom", installed.Path)
+			unchanged, err := os.ReadFile(defaultPath)
+			require.NoError(t, err)
+			require.Equal(t, defaultContent, string(unchanged))
+		})
 	}
 }

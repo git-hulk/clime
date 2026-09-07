@@ -26,8 +26,8 @@ func Targets() ([]Target, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 	targets := make([]Target, 0, len(targetHomes))
-	for _, t := range targetHomes {
-		targets = append(targets, Target{Name: t.name, Dir: filepath.Join(home, t.dir)})
+	for _, target := range targetHomes {
+		targets = append(targets, Target{Name: target.name, Dir: filepath.Join(home, target.dir)})
 	}
 	return targets, nil
 }
@@ -40,34 +40,34 @@ func DetectTargets() ([]Target, error) {
 		return nil, err
 	}
 	var detected []Target
-	for _, t := range all {
-		if t.Name == "agents" || t.Exists() {
-			detected = append(detected, t)
+	for _, target := range all {
+		if target.Name == "agents" || target.Exists() {
+			detected = append(detected, target)
 		}
 	}
 	return detected, nil
 }
 
 // Exists reports whether the target's base directory exists.
-func (t Target) Exists() bool {
-	info, err := os.Stat(t.Dir)
+func (target Target) Exists() bool {
+	info, err := os.Stat(target.Dir)
 	return err == nil && info.IsDir()
 }
 
-func (t Target) skillDir(name string) string {
-	return filepath.Join(t.Dir, "skills", name)
+func (target Target) skillDir(name string) string {
+	return filepath.Join(target.Dir, "skills", name)
 }
 
 // Install writes the given skill files under <Dir>/skills/<name>/.
 // The Claude target links to the shared copy, which must be installed first.
-func (t Target) Install(name string, files map[string][]byte) error {
-	dir := t.skillDir(name)
-	if t.Name == "claude" {
-		shared := filepath.Join(filepath.Dir(t.Dir), ".agents", "skills", name)
+func (target Target) Install(name string, files map[string][]byte) error {
+	dir := target.skillDir(name)
+	if target.Name == "claude" {
+		shared := filepath.Join(filepath.Dir(target.Dir), ".agents", "skills", name)
 		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 			return fmt.Errorf("failed to create skills directory: %w", err)
 		}
-		if _, err := t.Remove(name); err != nil {
+		if _, err := target.Remove(name); err != nil {
 			return err
 		}
 		if err := os.Symlink(shared, dir); err != nil {
@@ -88,8 +88,8 @@ func (t Target) Install(name string, files map[string][]byte) error {
 }
 
 // Remove deletes <Dir>/skills/<name>/, reporting whether it existed.
-func (t Target) Remove(name string) (bool, error) {
-	dir := t.skillDir(name)
+func (target Target) Remove(name string) (bool, error) {
+	dir := target.skillDir(name)
 	if _, err := os.Lstat(dir); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil

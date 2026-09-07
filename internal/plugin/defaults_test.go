@@ -1,8 +1,9 @@
 package plugin
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCategorizeForInit(t *testing.T) {
@@ -95,15 +96,9 @@ func TestCategorizeForInit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			install, reinstall, skipped := CategorizeForInit(tt.plugins, tt.manifest)
-			if got := names(install); !reflect.DeepEqual(got, tt.wantInstall) {
-				t.Errorf("install: got %v, want %v", got, tt.wantInstall)
-			}
-			if got := names(reinstall); !reflect.DeepEqual(got, tt.wantReinstall) {
-				t.Errorf("reinstall: got %v, want %v", got, tt.wantReinstall)
-			}
-			if !reflect.DeepEqual(skipped, tt.wantSkipped) {
-				t.Errorf("skipped: got %v, want %v", skipped, tt.wantSkipped)
-			}
+			assert.Equal(t, tt.wantInstall, names(install))
+			assert.Equal(t, tt.wantReinstall, names(reinstall))
+			assert.Equal(t, tt.wantSkipped, skipped)
 		})
 	}
 }

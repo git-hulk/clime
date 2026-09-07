@@ -28,13 +28,13 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-func (r *Release) Version() string {
-	return strings.TrimPrefix(r.TagName, "v")
+func (release *Release) Version() string {
+	return strings.TrimPrefix(release.TagName, "v")
 }
 
-func (r *Release) FindTarGzAsset(prefix, goos, goarch string) (*Asset, error) {
+func (release *Release) FindTarGzAsset(prefix, goos, goarch string) (*Asset, error) {
 	suffix := fmt.Sprintf("_%s_%s.tar.gz", goos, goarch)
-	for _, asset := range r.Assets {
+	for _, asset := range release.Assets {
 		if strings.HasPrefix(asset.Name, prefix) && strings.HasSuffix(asset.Name, suffix) {
 			return &asset, nil
 		}
@@ -42,34 +42,34 @@ func (r *Release) FindTarGzAsset(prefix, goos, goarch string) (*Asset, error) {
 	return nil, fmt.Errorf("no release asset found for %s/%s (looked for %s*%s)", goos, goarch, prefix, suffix)
 }
 
-// ghRelease is the JSON shape returned by `gh release view --json tagName,assets`.
-type ghRelease struct {
-	TagName string    `json:"tagName"`
-	Assets  []ghAsset `json:"assets"`
+// githubCLIRelease is the JSON shape returned by `gh release view --json tagName,assets`.
+type githubCLIRelease struct {
+	TagName string           `json:"tagName"`
+	Assets  []githubCLIAsset `json:"assets"`
 }
 
-type ghAsset struct {
+type githubCLIAsset struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 }
 
-func fetchLatestViaGH(repo string) (*Release, error) {
-	out, err := exec.Command("gh", "release", "view",
+func fetchLatestViaGitHubCLI(repo string) (*Release, error) {
+	output, err := exec.Command("gh", "release", "view",
 		"--repo", repo,
 		"--json", "tagName,assets",
 	).Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh release view: %w", err)
 	}
-	var gr ghRelease
-	if err := json.Unmarshal(out, &gr); err != nil {
+	var cliRelease githubCLIRelease
+	if err := json.Unmarshal(output, &cliRelease); err != nil {
 		return nil, fmt.Errorf("parse gh release output: %w", err)
 	}
-	release := &Release{TagName: gr.TagName}
-	for _, a := range gr.Assets {
+	release := &Release{TagName: cliRelease.TagName}
+	for _, asset := range cliRelease.Assets {
 		release.Assets = append(release.Assets, Asset{
-			Name:               a.Name,
-			BrowserDownloadURL: a.URL,
+			Name:               asset.Name,
+			BrowserDownloadURL: asset.URL,
 		})
 	}
 	return release, nil
@@ -77,32 +77,32 @@ func fetchLatestViaGH(repo string) (*Release, error) {
 
 func FetchLatest(repo string) (*Release, error) {
 	if githubcli.Authenticated() {
-		return fetchLatestViaGH(repo)
+		return fetchLatestViaGitHubCLI(repo)
 	}
 
 	url := fmt.Sprintf("%s/repos/%s/releases/latest", apiBase, repo)
-	req, err := http.NewRequest("GET", url, nil)
+	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("Accept", "application/vnd.github+json")
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer response.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		return nil, fmt.Errorf("GitHub API returned %d: %s", response.StatusCode, string(body))
 	}
 
 	var release Release
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&release); err != nil {
 		return nil, err
 	}
 	return &release, nil
@@ -130,7 +130,7 @@ func DownloadTarGzBinary(downloadURL, binaryName string) ([]byte, error) {
 	var archiveData []byte
 
 	if repo, assetName, ok := parseGitHubDownloadURL(downloadURL); ok && githubcli.Authenticated() {
-		out, err := exec.Command("gh", "release", "download",
+		output, err := exec.Command("gh", "release", "download",
 			"--repo", repo,
 			"--pattern", assetName,
 			"--output", "-",
@@ -138,30 +138,30 @@ func DownloadTarGzBinary(downloadURL, binaryName string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("gh release download: %w", err)
 		}
-		archiveData = out
+		archiveData = output
 	}
 
 	if archiveData == nil {
-		req, err := http.NewRequest("GET", downloadURL, nil)
+		request, err := http.NewRequest("GET", downloadURL, nil)
 		if err != nil {
 			return nil, err
 		}
 		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("Authorization", "Bearer "+token)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer response.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return nil, fmt.Errorf("download failed with status %d: %s", resp.StatusCode, string(body))
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			return nil, fmt.Errorf("download failed with status %d: %s", response.StatusCode, string(body))
 		}
 
-		archiveData, err = io.ReadAll(resp.Body)
+		archiveData, err = io.ReadAll(response.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read response body: %w", err)
 		}
@@ -171,15 +171,15 @@ func DownloadTarGzBinary(downloadURL, binaryName string) ([]byte, error) {
 }
 
 func extractBinaryFromTarGz(data []byte, binaryName string) ([]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
+	gzipReader, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decompress archive: %w", err)
 	}
-	defer gz.Close()
+	defer gzipReader.Close()
 
-	tr := tar.NewReader(gz)
+	tarReader := tar.NewReader(gzipReader)
 	for {
-		header, err := tr.Next()
+		header, err := tarReader.Next()
 		if err == io.EOF {
 			break
 		}
@@ -189,7 +189,7 @@ func extractBinaryFromTarGz(data []byte, binaryName string) ([]byte, error) {
 		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != binaryName {
 			continue
 		}
-		content, err := io.ReadAll(tr)
+		content, err := io.ReadAll(tarReader)
 		if err != nil {
 			return nil, fmt.Errorf("read binary from archive: %w", err)
 		}

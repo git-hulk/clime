@@ -28,6 +28,8 @@
 - Keep packages small and single-purpose under `internal/`.
 - File and package names should be lowercase; command files in `cmd/` should map to subcommands (for example, `update.go` -> `clime update`).
 - Error messages should wrap context (`fmt.Errorf("...: %w", err)`).
+- Log messages must start with a capital letter.
+- Use meaningful, descriptive names for variables, functions, and structs; avoid meaningless abbreviations or short names.
 - Design carefully when creating new commands, including command API and member function signatures (name, parameters, and return values).
 - Keep functionality between commands orthogonal and clean.
 - Avoid ad hoc helper functions; prioritize maintainable, well-structured code.

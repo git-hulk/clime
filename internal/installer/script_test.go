@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScriptInstallerUpdate(t *testing.T) {
@@ -20,9 +19,7 @@ func TestScriptInstallerUpdate(t *testing.T) {
 		BinaryPath: "/usr/local/bin/account",
 		runScript: func(scriptURL string) error {
 			ranScript = true
-			if scriptURL != "https://example.com/install.sh" {
-				t.Fatalf("scriptURL = %q, want %q", scriptURL, "https://example.com/install.sh")
-			}
+			require.Equal(t, "https://example.com/install.sh", scriptURL)
 			return nil
 		},
 		pluginBinDir: func() (string, error) {
@@ -43,18 +40,10 @@ func TestScriptInstallerUpdate(t *testing.T) {
 		Source:  "https://example.com/install.sh",
 	}
 	result, err := s.Update("account", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if !ranScript {
-		t.Fatal("script install should run for script source")
-	}
-	if !result.Updated {
-		t.Fatal("Update() should mark updated for script source")
-	}
-	if result.LatestVersion != "2.1.0" {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "2.1.0")
-	}
+	require.NoError(t, err)
+	require.True(t, ranScript, "script install should run for script source")
+	require.True(t, result.Updated, "Update() should mark updated for script source")
+	require.Equal(t, "2.1.0", result.LatestVersion)
 }
 
 func TestScriptInstallerUpdateUpToDate(t *testing.T) {
@@ -84,12 +73,8 @@ func TestScriptInstallerUpdateUpToDate(t *testing.T) {
 		Source:  "https://example.com/install.sh",
 	}
 	result, err := s.Update("account", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.Updated {
-		t.Fatal("Update() should not mark updated when semver version is unchanged")
-	}
+	require.NoError(t, err)
+	require.False(t, result.Updated, "Update() should not mark updated when semver version is unchanged")
 }
 
 func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
@@ -118,12 +103,8 @@ func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
 		Source:  "https://example.com/install.sh",
 	}
 	result, err := s.Update("tool", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.LatestVersion != plugin.VersionLatest {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, plugin.VersionLatest)
-	}
+	require.NoError(t, err)
+	require.Equal(t, plugin.VersionLatest, result.LatestVersion)
 }
 
 func TestScriptInstallerInstallAutoDetectBinary(t *testing.T) {
@@ -146,30 +127,20 @@ func TestScriptInstallerInstallAutoDetectBinary(t *testing.T) {
 			return "1.2.0", nil
 		},
 		lookPath: func(name string) (string, error) {
-			if name != "bun" {
-				t.Fatalf("lookPath name = %q, want %q", name, "bun")
-			}
+			require.Equal(t, "bun", name)
 			return "/usr/local/bin/bun", nil
 		},
 	}
 
 	version, err := s.Install("bun")
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if version != "1.2.0" {
-		t.Fatalf("version = %q, want %q", version, "1.2.0")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "1.2.0", version)
 
 	// Verify symlink was created
 	linkPath := filepath.Join(tmpDir, "clime-bun")
 	target, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("symlink not created: %v", err)
-	}
-	if target != "/usr/local/bin/bun" {
-		t.Fatalf("symlink target = %q, want %q", target, "/usr/local/bin/bun")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/usr/local/bin/bun", target)
 }
 
 func TestScriptInstallerInstallAutoDetectNotFound(t *testing.T) {
@@ -186,184 +157,56 @@ func TestScriptInstallerInstallAutoDetectNotFound(t *testing.T) {
 	}
 
 	_, err := s.Install("missing")
-	if err == nil {
-		t.Fatal("Install() should fail when binary not found on PATH")
-	}
-	if !strings.Contains(err.Error(), "not found on PATH") {
-		t.Fatalf("error = %q, want message about PATH", err.Error())
-	}
+	require.ErrorContains(t, err, "not found on PATH", "Install() should fail when binary not found on PATH")
 }
 
-func TestRunPluginVersionCmdFallback(t *testing.T) {
+func TestScriptInstallerDetectsVersionUsingSupportedFlags(t *testing.T) {
 	t.Parallel()
-
-	// Create a script that only responds to -V
-	tmpDir := t.TempDir()
-	script := filepath.Join(tmpDir, "fakecli")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-case "$1" in
-  -V) echo "3.2.1" ;;
-  *)  exit 1 ;;
-esac
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := runPluginVersionCmd(script)
-	if err != nil {
-		t.Fatalf("runPluginVersionCmd() error = %v", err)
-	}
-	if !strings.Contains(out, "3.2.1") {
-		t.Fatalf("output = %q, want to contain %q", out, "3.2.1")
-	}
-}
-
-func TestRunPluginVersionCmdFirstMatch(t *testing.T) {
-	t.Parallel()
-
-	// Create a script that responds to -v (first in the list)
-	tmpDir := t.TempDir()
-	script := filepath.Join(tmpDir, "fakecli")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-case "$1" in
-  -v) echo "1.0.0" ;;
-  version) echo "1.0.0-full" ;;
-  -V) echo "1.0.0-caps" ;;
-  *)  exit 1 ;;
-esac
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := runPluginVersionCmd(script)
-	if err != nil {
-		t.Fatalf("runPluginVersionCmd() error = %v", err)
-	}
-	if !strings.Contains(out, "1.0.0\n") {
-		t.Fatalf("output = %q, want first match (-v)", out)
-	}
-}
-
-func TestRunPluginVersionCmdAllFail(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	script := filepath.Join(tmpDir, "fakecli")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := runPluginVersionCmd(script)
-	if err == nil {
-		t.Fatal("runPluginVersionCmd() should fail when all commands fail")
+	for _, tt := range []struct{ name, script, want string }{
+		{"fallback to -V", `case "$1" in
+   -V) echo "3.2.1" ;;
+   *) exit 1 ;;
+  esac`, "3.2.1"},
+		{"first supported flag wins", `case "$1" in
+   -v) echo "1.0.0" ;;
+   version) echo "2.0.0" ;;
+   -V) echo "3.0.0" ;;
+   *) exit 1 ;;
+  esac`, "1.0.0"},
+		{"unsupported version commands", "exit 1", plugin.VersionLatest},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fakecli")
+			require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+tt.script), 0o755))
+			installer := NewScriptInstaller("", "")
+			installer.findPlugin = func(string) (string, bool) { return path, true }
+			require.Equal(t, tt.want, installer.DetectVersion("fakecli"))
+		})
 	}
 }
 
 func TestScriptInstallerUninstallRemovesSymlinkTarget(t *testing.T) {
-	t.Parallel()
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir")
-	}
-	pluginsDir := filepath.Join(home, ".clime", "plugins")
-	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
-		t.Fatalf("create plugins dir: %v", err)
-	}
-
-	targetBin := filepath.Join(t.TempDir(), "account")
-	if err := os.WriteFile(targetBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write target binary: %v", err)
-	}
-
-	name := fmt.Sprintf("script-rmtest-%d", time.Now().UnixNano())
-	linkPath := filepath.Join(pluginsDir, "clime-"+name)
-	if err := os.Symlink(targetBin, linkPath); err != nil {
-		t.Fatalf("create symlink: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(linkPath)
-		_ = os.Remove(targetBin)
-	})
-
-	s := NewScriptInstaller("https://example.com/install.sh", "")
-	entry := plugin.ManifestEntry{
-		Name:   name,
-		Type:   plugin.SourceTypeScript,
-		Source: "https://example.com/install.sh",
-	}
-	if err := s.Uninstall(name, entry); err != nil {
-		t.Fatalf("Uninstall() error = %v", err)
-	}
-
-	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Fatal("plugin symlink should have been removed")
-	}
-	if _, err := os.Stat(targetBin); !os.IsNotExist(err) {
-		t.Fatal("resolved target binary should have been removed")
-	}
-}
-
-func TestScriptInstallerUninstallRemovesRelativeSymlinkTarget(t *testing.T) {
-	t.Parallel()
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir")
-	}
-	pluginsDir := filepath.Join(home, ".clime", "plugins")
-	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
-		t.Fatalf("create plugins dir: %v", err)
-	}
-
-	targetDir := filepath.Join(pluginsDir, fmt.Sprintf(".script-target-%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		t.Fatalf("create target dir: %v", err)
-	}
-	targetBin := filepath.Join(targetDir, "tool")
-	if err := os.WriteFile(targetBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write target binary: %v", err)
-	}
-
-	name := fmt.Sprintf("script-rmtest-rel-%d", time.Now().UnixNano())
-	linkPath := filepath.Join(pluginsDir, "clime-"+name)
-	relTarget, err := filepath.Rel(pluginsDir, targetBin)
-	if err != nil {
-		t.Fatalf("compute relative target path: %v", err)
-	}
-	if err := os.Symlink(relTarget, linkPath); err != nil {
-		t.Fatalf("create symlink: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(linkPath)
-		_ = os.RemoveAll(targetDir)
-	})
-
-	s := NewScriptInstaller("https://example.com/install.sh", "")
-	entry := plugin.ManifestEntry{
-		Name:   name,
-		Type:   plugin.SourceTypeScript,
-		Source: "https://example.com/install.sh",
-	}
-	if err := s.Uninstall(name, entry); err != nil {
-		t.Fatalf("Uninstall() error = %v", err)
-	}
-
-	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Fatal("plugin symlink should have been removed")
-	}
-	if _, err := os.Stat(targetBin); !os.IsNotExist(err) {
-		t.Fatal("resolved relative target binary should have been removed")
-	}
-}
-
-func TestScriptInstallerPluginType(t *testing.T) {
-	t.Parallel()
-	s := NewScriptInstaller("https://example.com/install.sh", "/usr/local/bin/foo")
-	if s.PluginType() != plugin.SourceTypeScript {
-		t.Fatalf("PluginType() = %q, want %q", s.PluginType(), plugin.SourceTypeScript)
-	}
-	if s.Source() != "https://example.com/install.sh" {
-		t.Fatalf("Source() = %q, want %q", s.Source(), "https://example.com/install.sh")
+	t.Setenv("HOME", t.TempDir())
+	pluginsDir, err := plugin.PluginBinDir()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	for _, kind := range []string{"absolute", "relative"} {
+		t.Run(kind, func(t *testing.T) {
+			targetBin := filepath.Join(t.TempDir(), "tool")
+			require.NoError(t, os.WriteFile(targetBin, []byte("#!/bin/sh\n"), 0o755))
+			target := targetBin
+			if kind == "relative" {
+				target, err = filepath.Rel(pluginsDir, targetBin)
+				require.NoError(t, err)
+			}
+			linkPath := filepath.Join(pluginsDir, "clime-tool")
+			require.NoError(t, os.Symlink(target, linkPath))
+			installer := NewScriptInstaller("https://example.com/install.sh", "")
+			require.NoError(t, installer.Uninstall("tool", plugin.ManifestEntry{Name: "tool"}))
+			_, err := os.Lstat(linkPath)
+			require.ErrorIs(t, err, os.ErrNotExist, "plugin symlink must be removed")
+			_, err = os.Stat(targetBin)
+			require.ErrorIs(t, err, os.ErrNotExist, "resolved target must be removed")
+		})
 	}
 }

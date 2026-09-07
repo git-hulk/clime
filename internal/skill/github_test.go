@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func fakeGitHubCLI(t *testing.T) string {
@@ -32,12 +35,8 @@ case "$4" in
   *) echo "unexpected gh call" >&2; exit 1;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\necho 'unexpected git call' >> \"$CLIME_TEST_GH_LOG\"\nexit 99\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\necho 'unexpected git call' >> \"$CLIME_TEST_GH_LOG\"\nexit 99\n"), 0o755))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return dir
 }
@@ -45,28 +44,21 @@ esac
 func githubTestArchive(t *testing.T, path string, headers []tar.Header) {
 	t.Helper()
 	file, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
 	for _, h := range headers {
 		if h.Typeflag == tar.TypeReg {
 			h.Size = int64(len("# Skill"))
 		}
-		if err := tw.WriteHeader(&h); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, tw.WriteHeader(&h))
 		if h.Typeflag == tar.TypeReg {
-			if _, err := tw.Write([]byte("# Skill")); err != nil {
-				t.Fatal(err)
-			}
+			_, err := tw.Write([]byte("# Skill"))
+			require.NoError(t, err)
 		}
 	}
 	for _, close := range []func() error{tw.Close, gz.Close, file.Close} {
-		if err := close(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, close())
 	}
 }
 
@@ -82,61 +74,52 @@ func TestGitHubSnapshotUsesAuthenticatedGHAndReusesCache(t *testing.T) {
 	st.Progress = func(message string) { progress = append(progress, message) }
 	src := Source{Repo: "owner/repo"}
 	snap, err := st.Snapshot(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap.Version != "v2.0.0" {
-		t.Fatalf("version = %q", snap.Version)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "v2.0.0", snap.Version)
 	catalog, err := snap.Catalog()
-	if err != nil || len(catalog.Skills) != 1 || catalog.Skills[0].Name != "alpha" {
-		t.Fatalf("catalog = %+v, %v", catalog, err)
-	}
-	if len(progress) == 0 || !strings.Contains(strings.Join(progress, "\n"), "KiB") {
-		t.Fatalf("missing download progress: %v", progress)
-	}
-	if info, err := os.Stat(filepath.Join(snap.Dir, "skills/alpha/run.sh")); err != nil || info.Mode().Perm() != 0o755 {
-		t.Fatalf("executable mode not preserved: %v, %v", info, err)
-	}
-	if body, err := os.ReadFile(filepath.Join(snap.Dir, "skills/alpha/link")); err != nil || string(body) != "# Skill" {
-		t.Fatalf("symlink not preserved: %q, %v", body, err)
-	}
-	if _, err := st.Snapshot(src.WithQuery("v1")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.Len(t, catalog.Skills, 1)
+	require.Equal(t, "alpha", catalog.Skills[0].Name)
+	require.NotEmpty(t, progress)
+	require.Contains(t, strings.Join(progress, "\n"), "KiB")
+
+	info, err := os.Stat(filepath.Join(snap.Dir, "skills/alpha/run.sh"))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+
+	body, err := os.ReadFile(filepath.Join(snap.Dir, "skills/alpha/link"))
+	require.NoError(t, err)
+	require.Equal(t, "# Skill", string(body))
+
+	_, err = st.Snapshot(src.WithQuery("v1"))
+	require.NoError(t, err)
+
 	calls, err := os.ReadFile(filepath.Join(dir, "calls"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(calls), "auth status --hostname github.com") != 1 || strings.Contains(string(calls), "unexpected git") {
-		t.Fatalf("expected one login check and only gh operations: %s", calls)
-	}
-	if !strings.Contains(string(calls), "--paginate") {
-		t.Fatal("tag lookup must paginate")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(calls), "auth status --hostname github.com"))
+	require.NotContains(t, string(calls), "unexpected git")
+	require.Contains(t, string(calls), "--paginate", "tag lookup must paginate")
 	t.Setenv("CLIME_TEST_GH_FAIL", "1")
 	progress = nil
-	if _, err := st.Snapshot(src.WithQuery("v2.0.0")); err != nil || len(progress) != 0 {
-		t.Fatalf("offline cache reuse = %v, progress = %v", err, progress)
-	}
+
+	_, err = st.Snapshot(src.WithQuery("v2.0.0"))
+	require.NoError(t, err)
+	require.Empty(t, progress)
+
 	after, _ := os.ReadFile(filepath.Join(dir, "calls"))
-	if string(after) != string(calls) {
-		t.Fatal("cache hit must not invoke gh or git")
-	}
-	if _, err := st.Snapshot(src.WithQuery("latest")); err == nil {
-		t.Fatal("authenticated gh failures must be reported")
-	}
+	require.Equal(t, string(calls), string(after), "cache hit must not invoke gh or git")
+
+	_, err = st.Snapshot(src.WithQuery("latest"))
+	require.Error(t, err, "authenticated gh failures must be reported")
+
 	failedVersion := strings.Repeat("c", 40)
-	if _, err := st.Snapshot(src.WithQuery(failedVersion)); err == nil || !strings.Contains(err.Error(), "access denied") {
-		t.Fatalf("download failure must be reported: %v", err)
-	}
-	if dirExists(versionDir(st.repoDir(src), failedVersion)) {
-		t.Fatal("failed download must not be cached")
-	}
+
+	_, err = st.Snapshot(src.WithQuery(failedVersion))
+	require.ErrorContains(t, err, "access denied")
+
+	require.False(t, dirExists(versionDir(st.repoDir(src), failedVersion)), "failed download must not be cached")
 	after, _ = os.ReadFile(filepath.Join(dir, "calls"))
-	if strings.Contains(string(after), "unexpected git") {
-		t.Fatal("authenticated gh failure must not fall back to git")
-	}
+	require.NotContains(t, string(after), "unexpected git", "authenticated gh failure must not fall back to git")
 }
 
 func TestGitHubVersionQueries(t *testing.T) {
@@ -147,36 +130,29 @@ func TestGitHubVersionQueries(t *testing.T) {
 		{strings.Repeat("c", 40), strings.Repeat("c", 40)}, {"bbbbbbb", strings.Repeat("b", 40)},
 	} {
 		got, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, tt.query)
-		if err != nil || got != tt.want {
-			t.Fatalf("%s: got %q, %v; want %q", tt.query, got, err, tt.want)
-		}
+		require.NoError(t, err)
+		require.Equal(t, tt.want, got)
 	}
 	writeFile(t, filepath.Join(dir, "tags"), "")
 	got, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, "latest")
-	if err != nil || got != strings.Repeat("b", 40) {
-		t.Fatalf("untagged HEAD = %q, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, strings.Repeat("b", 40), got)
 	for _, query := range []string{"missing", "v9", "ddddddd"} {
-		if _, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, query); err == nil {
-			t.Fatalf("unknown query %q must fail", query)
-		}
+		_, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, query)
+		require.Error(t, err)
 	}
 	writeFile(t, filepath.Join(dir, "branches"), "one\tabcdef012"+strings.Repeat("a", 31)+"\ntwo\tabcdef012"+strings.Repeat("b", 31)+"\n")
-	if _, err := resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, "abcdef0"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("ambiguous prefix = %v", err)
-	}
+
+	_, err = resolveVersion(&githubSource{Source: Source{Repo: "owner/repo"}}, "abcdef0")
+	require.ErrorContains(t, err, "ambiguous")
 }
 
 func TestGitHubSourceForms(t *testing.T) {
 	for _, repo := range []string{"owner/repo", "https://github.com/owner/repo.git", "git@github.com:owner/repo.git", "ssh://git@github.com/owner/repo.git"} {
-		if got := (Source{Repo: repo}).githubRepo(); got != "owner/repo" {
-			t.Errorf("%s => %q", repo, got)
-		}
+		assert.Equal(t, "owner/repo", (Source{Repo: repo}).githubRepo())
 	}
 	for _, repo := range []string{t.TempDir(), "file:///tmp/repo", "https://gitlab.com/owner/repo", "https://github.com.evil.test/owner/repo"} {
-		if got := (Source{Repo: repo}).githubRepo(); got != "" {
-			t.Errorf("%s incorrectly treated as GitHub: %q", repo, got)
-		}
+		assert.Empty(t, (Source{Repo: repo}).githubRepo())
 	}
 }
 
@@ -184,28 +160,19 @@ func TestGitHubLoggedOutUsesGit(t *testing.T) {
 	remote := createTestGitRepo(t, "skills/alpha", map[string]string{"SKILL.md": "# Skill"})
 	gitIn(t, remote, "tag", "v1.0.0")
 	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	dir := fakeGitHubCLI(t)
 	t.Setenv("CLIME_TEST_GH_AUTH_EXIT", "1")
-	if err := os.Remove(filepath.Join(dir, "git")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Remove(filepath.Join(dir, "git")))
+	require.NoError(t, os.Symlink(git, filepath.Join(dir, "git")))
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "url.file://"+remote+".insteadOf")
 	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/owner/repo.git")
 	snap, err := newTestStore(t).Snapshot(Source{Repo: "owner/repo"})
-	if err != nil || snap.Version != "v1.0.0" {
-		t.Fatalf("logged-out Git fetch = %+v, %v", snap, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "v1.0.0", snap.Version)
 	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
-	if strings.Contains(string(calls), "api ") {
-		t.Fatalf("logged-out gh must not make API calls: %s", calls)
-	}
+	require.NotContains(t, string(calls), "api ")
 }
 
 func TestGitHubFailedArchiveDoesNotPublishSnapshot(t *testing.T) {
@@ -219,20 +186,15 @@ func TestGitHubFailedArchiveDoesNotPublishSnapshot(t *testing.T) {
 		if strings.HasSuffix(name, "/truncated") {
 			archive := filepath.Join(dir, "archive.tar.gz")
 			info, err := os.Stat(archive)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Truncate(archive, info.Size()-8); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+			require.NoError(t, os.Truncate(archive, info.Size()-8))
 		}
 		st := newTestStore(t)
 		src := Source{Repo: "owner/repo", Query: strings.Repeat("a", 40)}
-		if _, err := st.Snapshot(src); err == nil {
-			t.Fatal("unsafe archive must fail")
-		}
-		if dirExists(versionDir(st.repoDir(src), src.Query)) {
-			t.Fatal("failed archive must not be cached")
-		}
+
+		_, err := st.Snapshot(src)
+		require.Error(t, err, "unsafe archive must fail")
+
+		require.False(t, dirExists(versionDir(st.repoDir(src), src.Query)), "failed archive must not be cached")
 	}
 }

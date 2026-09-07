@@ -82,14 +82,14 @@ func selectInteractive(config SelectConfig) (int, error) {
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
 	for {
-		b := make([]byte, 4)
-		n, err := os.Stdin.Read(b)
+		inputBytes := make([]byte, 4)
+		bytesRead, err := os.Stdin.Read(inputBytes)
 		if err != nil {
 			return 0, err
 		}
 
-		if n == 1 {
-			switch b[0] {
+		if bytesRead == 1 {
+			switch inputBytes[0] {
 			case 13: // Enter
 				clearLines(len(config.Options) + 2)
 				fmt.Printf("%s %s%s", uicli.Info.Sprint("?"), config.Label, crlf)
@@ -102,16 +102,16 @@ func selectInteractive(config SelectConfig) (int, error) {
 				clearLines(len(config.Options) + 2)
 				return 0, ErrBack
 			}
-		} else if n >= 3 && b[0] == 27 && b[1] == 91 {
-			switch b[2] {
+		} else if bytesRead >= 3 && inputBytes[0] == 27 && inputBytes[1] == 91 {
+			switch inputBytes[2] {
 			case 67, 68: // Right, Left
 				option := config.RightOption
-				if b[2] == 68 {
+				if inputBytes[2] == 68 {
 					option = config.LeftOption
 				}
-				if idx := slices.Index(config.Options, option); option != "" && idx >= 0 {
+				if optionIndex := slices.Index(config.Options, option); option != "" && optionIndex >= 0 {
 					clearLines(len(config.Options) + 2)
-					return idx, nil
+					return optionIndex, nil
 				}
 			case 65: // Up
 				if current > 0 {
@@ -174,12 +174,12 @@ func selectFallback(config SelectConfig) (int, error) {
 	if input == "" {
 		return config.Default, nil
 	}
-	sel, err := strconv.Atoi(input)
-	if err != nil || sel < 1 || sel > len(config.Options) {
+	selection, err := strconv.Atoi(input)
+	if err != nil || selection < 1 || selection > len(config.Options) {
 		fmt.Printf("Invalid selection. Please choose a number between 1 and %d\n", len(config.Options))
 		return selectFallback(config)
 	}
-	return sel - 1, nil
+	return selection - 1, nil
 }
 
 // --- multi select (interactive) ---
@@ -204,14 +204,14 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
 	for {
-		b := make([]byte, 4)
-		n, err := os.Stdin.Read(b)
+		inputBytes := make([]byte, 4)
+		bytesRead, err := os.Stdin.Read(inputBytes)
 		if err != nil {
 			return nil, err
 		}
 
-		if n == 1 {
-			switch b[0] {
+		if bytesRead == 1 {
+			switch inputBytes[0] {
 			case 13: // Enter
 				clearLines(lines)
 				var result []int
@@ -237,8 +237,8 @@ func multiSelectInteractive(config SelectConfig) ([]int, error) {
 				selected[current] = !selected[current]
 				refreshMultiSelect(config, current, selected)
 			}
-		} else if n >= 3 && b[0] == 27 && b[1] == 91 {
-			switch b[2] {
+		} else if bytesRead >= 3 && inputBytes[0] == 27 && inputBytes[1] == 91 {
+			switch inputBytes[2] {
 			case 67: // Right
 				if next := (current/config.pageSize() + 1) * config.pageSize(); next < len(config.Options) {
 					current = next
@@ -361,11 +361,11 @@ func multiSelectFallback(config SelectConfig) ([]int, error) {
 			start = max(0, start-config.pageSize())
 			continue
 		}
-		sel, err := strconv.Atoi(input)
-		if err != nil || sel < 1 || sel > len(config.Options) {
+		selection, err := strconv.Atoi(input)
+		if err != nil || selection < 1 || selection > len(config.Options) {
 			continue
 		}
-		selected[sel-1] = !selected[sel-1]
+		selected[selection-1] = !selected[selection-1]
 	}
 }
 
@@ -383,8 +383,8 @@ func Input(label string) (string, error) {
 
 // --- helpers ---
 
-func clearLines(n int) {
-	fmt.Printf("\033[%dA\033[J", n)
+func clearLines(lineCount int) {
+	fmt.Printf("\033[%dA\033[J", lineCount)
 }
 
 func readLine() (string, error) {

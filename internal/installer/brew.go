@@ -38,23 +38,23 @@ func NewBrewInstaller(formula string) *BrewInstaller {
 	}
 }
 
-func (b *BrewInstaller) Install(name string) (string, error) {
-	if _, err := b.lookPath("brew"); err != nil {
+func (installer *BrewInstaller) Install(name string) (string, error) {
+	if _, err := installer.lookPath("brew"); err != nil {
 		return "", fmt.Errorf("homebrew is not installed or not on PATH: %w", err)
 	}
 
-	installErr := b.runBrewInstall(b.Formula)
-	binaryPath, resolveErr := b.resolveInstalledBinary(name)
+	installErr := installer.runBrewInstall(installer.Formula)
+	binaryPath, resolveErr := installer.resolveInstalledBinary(name)
 	if installErr != nil {
 		// If brew install fails but an executable is already available, link it anyway.
 		if resolveErr != nil {
-			return "", fmt.Errorf("installing formula %q: %w", b.Formula, installErr)
+			return "", fmt.Errorf("installing formula %q: %w", installer.Formula, installErr)
 		}
 	} else if resolveErr != nil {
 		return "", resolveErr
 	}
 
-	installDir, err := b.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return "", err
 	}
@@ -68,7 +68,7 @@ func (b *BrewInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	version, err := b.getVersion(b.Formula)
+	version, err := installer.getVersion(installer.Formula)
 	if err != nil {
 		version = plugin.VersionLatest
 	}
@@ -76,28 +76,28 @@ func (b *BrewInstaller) Install(name string) (string, error) {
 	return version, nil
 }
 
-func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
-	if _, err := b.lookPath("brew"); err != nil {
+func (installer *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
+	if _, err := installer.lookPath("brew"); err != nil {
 		return nil, fmt.Errorf("homebrew is not installed or not on PATH: %w", err)
 	}
 
-	if err := b.runBrewUpdate(b.Formula); err != nil {
-		return nil, fmt.Errorf("failed to update brew plugin %q: %w", b.Formula, err)
+	if err := installer.runBrewUpdate(installer.Formula); err != nil {
+		return nil, fmt.Errorf("failed to update brew plugin %q: %w", installer.Formula, err)
 	}
 
-	version, err := b.getVersion(b.Formula)
+	version, err := installer.getVersion(installer.Formula)
 	if err != nil {
 		version = plugin.VersionLatest
 	}
 
-	installDir, err := b.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return nil, err
 	}
 
 	// Re-resolve the binary and update the symlink, since brew upgrade
 	// may change the Cellar path the binary lives under.
-	binaryPath, err := b.resolveInstalledBinary(name)
+	binaryPath, err := installer.resolveInstalledBinary(name)
 	if err == nil {
 		linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
 		os.Remove(linkPath)
@@ -112,7 +112,7 @@ func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*Upda
 
 	return &UpdateResult{
 		Name:           name,
-		Source:         b.Formula,
+		Source:         installer.Formula,
 		CurrentVersion: current.Version,
 		LatestVersion:  version,
 		Updated:        updated,
@@ -120,39 +120,39 @@ func (b *BrewInstaller) Update(name string, current plugin.ManifestEntry) (*Upda
 	}, nil
 }
 
-func (b *BrewInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
-	if _, err := b.lookPath("brew"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: homebrew not found, skipping brew uninstall for %s\n", b.Formula)
-	} else if err := b.runBrewUninstall(b.Formula); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: brew uninstall %s failed: %v\n", b.Formula, err)
+func (installer *BrewInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
+	if _, err := installer.lookPath("brew"); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: homebrew not found, skipping brew uninstall for %s\n", installer.Formula)
+	} else if err := installer.runBrewUninstall(installer.Formula); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: brew uninstall %s failed: %v\n", installer.Formula, err)
 	}
 	return removePluginBinary(name)
 }
 
-func (b *BrewInstaller) DetectVersion(name string) string {
-	version, err := b.getVersion(b.Formula)
+func (installer *BrewInstaller) DetectVersion(name string) string {
+	version, err := installer.getVersion(installer.Formula)
 	if err != nil {
 		return plugin.VersionLatest
 	}
 	return version
 }
 
-func (b *BrewInstaller) PluginType() string { return plugin.SourceTypeBrew }
-func (b *BrewInstaller) Source() string     { return b.Formula }
+func (installer *BrewInstaller) PluginType() string { return plugin.SourceTypeBrew }
+func (installer *BrewInstaller) Source() string     { return installer.Formula }
 
-func (b *BrewInstaller) resolveInstalledBinary(name string) (string, error) {
-	candidates := preferredBinaryNames(name, b.Formula)
+func (installer *BrewInstaller) resolveInstalledBinary(name string) (string, error) {
+	candidates := preferredBinaryNames(name, installer.Formula)
 	binName := candidates[0]
 
-	if b.brewBinDir != nil {
-		if binDir, err := b.brewBinDir(); err == nil {
+	if installer.brewBinDir != nil {
+		if binDir, err := installer.brewBinDir(); err == nil {
 			if path, ok := findFirstExistingBinary(binDir, candidates); ok {
 				return path, nil
 			}
 		}
 	}
 
-	lookPath := b.lookPath
+	lookPath := installer.lookPath
 	if lookPath == nil {
 		lookPath = osexec.LookPath
 	}
@@ -163,11 +163,11 @@ func (b *BrewInstaller) resolveInstalledBinary(name string) (string, error) {
 		}
 	}
 
-	formulaBinDir := b.formulaBinDir
+	formulaBinDir := installer.formulaBinDir
 	if formulaBinDir == nil {
 		formulaBinDir = brewFormulaBinDir
 	}
-	if binDir, err := formulaBinDir(b.Formula); err == nil {
+	if binDir, err := formulaBinDir(installer.Formula); err == nil {
 		if path, ok := findFirstExistingBinary(binDir, candidates); ok {
 			return path, nil
 		}
@@ -176,7 +176,7 @@ func (b *BrewInstaller) resolveInstalledBinary(name string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("binary %q or %q not found after brew install %q", binName, name, b.Formula)
+	return "", fmt.Errorf("binary %q or %q not found after brew install %q", binName, name, installer.Formula)
 }
 
 func preferredBinaryNames(name, formula string) []string {
@@ -314,29 +314,29 @@ func brewInstallOrUpgradeCmd(action, formula string) *osexec.Cmd {
 }
 
 func brewBinDir() (string, error) {
-	out, err := osexec.Command("brew", "--prefix").Output()
+	output, err := osexec.Command("brew", "--prefix").Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get brew prefix: %w", err)
 	}
-	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
+	return filepath.Join(strings.TrimSpace(string(output)), "bin"), nil
 }
 
 func brewFormulaBinDir(formula string) (string, error) {
-	out, err := osexec.Command("brew", "--prefix", formula).Output()
+	output, err := osexec.Command("brew", "--prefix", formula).Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get brew formula prefix: %w", err)
 	}
-	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
+	return filepath.Join(strings.TrimSpace(string(output)), "bin"), nil
 }
 
 // getBrewInstalledVersion returns the latest listed installed version for a formula.
 func getBrewInstalledVersion(formula string) (string, error) {
-	out, err := osexec.Command("brew", "list", "--versions", formula).Output()
+	output, err := osexec.Command("brew", "list", "--versions", formula).Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get brew formula version: %w", err)
 	}
 
-	fields := strings.Fields(strings.TrimSpace(string(out)))
+	fields := strings.Fields(strings.TrimSpace(string(output)))
 	if len(fields) < 2 {
 		return "", fmt.Errorf("formula %s is not installed", formula)
 	}

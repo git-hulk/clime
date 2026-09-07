@@ -15,21 +15,21 @@ import (
 // NpmInstaller installs plugins from npm global packages.
 type NpmInstaller struct {
 	Package         string
-	runNpmInstall   func(pkg string) error
-	runNpmUpdate    func(pkg string) error
-	runNpmUninstall func(pkg string) error
+	runNpmInstall   func(packageName string) error
+	runNpmUpdate    func(packageName string) error
+	runNpmUninstall func(packageName string) error
 	npmGlobalBinDir func() (string, error)
 	pluginBinDir    func() (string, error)
-	getVersion      func(pkg string) (string, error)
+	getVersion      func(packageName string) (string, error)
 }
 
 // NewNpmInstaller returns an NpmInstaller for the given npm package.
 // A bare "owner/repo" string is treated as a scoped package and rewritten to
 // "@owner/repo"; npm would otherwise resolve it as a GitHub shorthand, which
 // is rarely what callers want when they specify --npm.
-func NewNpmInstaller(pkg string) *NpmInstaller {
+func NewNpmInstaller(packageName string) *NpmInstaller {
 	return &NpmInstaller{
-		Package:         normalizeNpmPackageName(pkg),
+		Package:         normalizeNpmPackageName(packageName),
 		runNpmInstall:   runNpmGlobalInstall,
 		runNpmUpdate:    runNpmGlobalUpdate,
 		runNpmUninstall: runNpmGlobalUninstall,
@@ -43,42 +43,42 @@ func NewNpmInstaller(pkg string) *NpmInstaller {
 // treats them as scoped registry packages rather than GitHub shorthand.
 // Inputs that are already scoped, unscoped, URLs, protocol-prefixed
 // (git+https://, github:, file:, etc.), or local paths are returned as-is.
-func normalizeNpmPackageName(pkg string) string {
-	pkg = strings.TrimSpace(pkg)
-	if pkg == "" || strings.HasPrefix(pkg, "@") {
-		return pkg
+func normalizeNpmPackageName(packageName string) string {
+	packageName = strings.TrimSpace(packageName)
+	if packageName == "" || strings.HasPrefix(packageName, "@") {
+		return packageName
 	}
-	if strings.ContainsAny(pkg, ":\\") || strings.HasPrefix(pkg, ".") || strings.HasPrefix(pkg, "/") {
-		return pkg
+	if strings.ContainsAny(packageName, ":\\") || strings.HasPrefix(packageName, ".") || strings.HasPrefix(packageName, "/") {
+		return packageName
 	}
-	if strings.Count(pkg, "/") == 1 {
-		return "@" + pkg
+	if strings.Count(packageName, "/") == 1 {
+		return "@" + packageName
 	}
-	return pkg
+	return packageName
 }
 
-func (n *NpmInstaller) Install(name string) (string, error) {
+func (installer *NpmInstaller) Install(name string) (string, error) {
 	if _, err := osexec.LookPath("npm"); err != nil {
 		return "", fmt.Errorf("npm is not installed or not on PATH: %w", err)
 	}
 
-	npmBinDir, err := n.npmGlobalBinDir()
+	npmBinDir, err := installer.npmGlobalBinDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine npm global bin directory: %w", err)
 	}
 	before := snapshotDirEntries(npmBinDir)
 
-	if err := n.runNpmInstall(n.Package); err != nil {
+	if err := installer.runNpmInstall(installer.Package); err != nil {
 		return "", fmt.Errorf("npm install failed: %w", err)
 	}
 
 	binName := plugin.BinPrefix + name
-	binaryPath, err := locateNpmInstalledBinary(npmBinDir, n.Package, name, binName, before)
+	binaryPath, err := locateNpmInstalledBinary(npmBinDir, installer.Package, name, binName, before)
 	if err != nil {
 		return "", err
 	}
 
-	installDir, err := n.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +92,7 @@ func (n *NpmInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	version, err := n.getVersion(n.Package)
+	version, err := installer.getVersion(installer.Package)
 	if err != nil {
 		version = plugin.VersionLatest
 	}
@@ -100,17 +100,17 @@ func (n *NpmInstaller) Install(name string) (string, error) {
 	return version, nil
 }
 
-func (n *NpmInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
-	if err := n.runNpmUpdate(n.Package); err != nil {
-		return nil, fmt.Errorf("failed to update npm plugin %q: %w", n.Package, err)
+func (installer *NpmInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
+	if err := installer.runNpmUpdate(installer.Package); err != nil {
+		return nil, fmt.Errorf("failed to update npm plugin %q: %w", installer.Package, err)
 	}
 
-	version, err := n.getVersion(n.Package)
+	version, err := installer.getVersion(installer.Package)
 	if err != nil {
 		version = plugin.VersionLatest
 	}
 
-	installDir, err := n.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (n *NpmInstaller) Update(name string, current plugin.ManifestEntry) (*Updat
 
 	return &UpdateResult{
 		Name:           name,
-		Source:         n.Package,
+		Source:         installer.Package,
 		CurrentVersion: current.Version,
 		LatestVersion:  version,
 		Updated:        updated,
@@ -131,45 +131,45 @@ func (n *NpmInstaller) Update(name string, current plugin.ManifestEntry) (*Updat
 	}, nil
 }
 
-func (n *NpmInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
-	cmd := osexec.Command("npm", "uninstall", "-g", n.Package)
+func (installer *NpmInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
+	cmd := osexec.Command("npm", "uninstall", "-g", installer.Package)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: npm uninstall -g %s failed: %v\n%s", n.Package, err, string(output))
+		fmt.Fprintf(os.Stderr, "Warning: npm uninstall -g %s failed: %v\n%s", installer.Package, err, string(output))
 	}
 	return removePluginBinary(name)
 }
 
-func (n *NpmInstaller) DetectVersion(name string) string {
-	version, err := n.getVersion(n.Package)
+func (installer *NpmInstaller) DetectVersion(name string) string {
+	version, err := installer.getVersion(installer.Package)
 	if err != nil {
 		return plugin.VersionLatest
 	}
 	return version
 }
 
-func (n *NpmInstaller) PluginType() string { return plugin.SourceTypeNpm }
-func (n *NpmInstaller) Source() string     { return n.Package }
+func (installer *NpmInstaller) PluginType() string { return plugin.SourceTypeNpm }
+func (installer *NpmInstaller) Source() string     { return installer.Package }
 
 // npm helper functions
 
-func runNpmGlobalInstall(pkg string) error {
-	cmd := osexec.Command("npm", "install", "-g", pkg)
+func runNpmGlobalInstall(packageName string) error {
+	cmd := osexec.Command("npm", "install", "-g", packageName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("npm install failed: %w\n%s", err, string(output))
 	}
 	return nil
 }
 
-func runNpmGlobalUpdate(pkg string) error {
-	cmd := osexec.Command("npm", "update", "-g", pkg)
+func runNpmGlobalUpdate(packageName string) error {
+	cmd := osexec.Command("npm", "update", "-g", packageName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("npm update failed: %w\n%s", err, string(output))
 	}
 	return nil
 }
 
-func runNpmGlobalUninstall(pkg string) error {
-	cmd := osexec.Command("npm", "uninstall", "-g", pkg)
+func runNpmGlobalUninstall(packageName string) error {
+	cmd := osexec.Command("npm", "uninstall", "-g", packageName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("npm uninstall failed: %w\n%s", err, string(output))
 	}
@@ -177,11 +177,11 @@ func runNpmGlobalUninstall(pkg string) error {
 }
 
 func npmGlobalBinDir() (string, error) {
-	out, err := osexec.Command("npm", "prefix", "-g").Output()
+	output, err := osexec.Command("npm", "prefix", "-g").Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get npm global prefix: %w", err)
 	}
-	return filepath.Join(strings.TrimSpace(string(out)), "bin"), nil
+	return filepath.Join(strings.TrimSpace(string(output)), "bin"), nil
 }
 
 // snapshotDirEntries returns the set of entry names directly under dir, or an
@@ -192,8 +192,8 @@ func snapshotDirEntries(dir string) map[string]struct{} {
 	if err != nil {
 		return set
 	}
-	for _, e := range entries {
-		set[e.Name()] = struct{}{}
+	for _, entry := range entries {
+		set[entry.Name()] = struct{}{}
 	}
 	return set
 }
@@ -202,7 +202,7 @@ func snapshotDirEntries(dir string) map[string]struct{} {
 // It prefers clime-<name>, then <name>, then falls back to a single new entry
 // added to npmBinDir during the install. The error explains why no candidate
 // was found, including any unexpected new entries.
-func locateNpmInstalledBinary(npmBinDir, pkg, name, binName string, before map[string]struct{}) (string, error) {
+func locateNpmInstalledBinary(npmBinDir, packageName, name, binName string, before map[string]struct{}) (string, error) {
 	if path := filepath.Join(npmBinDir, binName); fileExists(path) {
 		return path, nil
 	}
@@ -221,11 +221,11 @@ func locateNpmInstalledBinary(npmBinDir, pkg, name, binName string, before map[s
 
 	switch len(added) {
 	case 0:
-		return "", fmt.Errorf("npm install of %q did not create a binary in %q; the package may not provide a CLI (check that the package name is correct, e.g. a scoped package starting with \"@\")", pkg, npmBinDir)
+		return "", fmt.Errorf("npm install of %q did not create a binary in %q; the package may not provide a CLI (check that the package name is correct, e.g. a scoped package starting with \"@\")", packageName, npmBinDir)
 	case 1:
 		return filepath.Join(npmBinDir, added[0]), nil
 	default:
-		return "", fmt.Errorf("npm install of %q created multiple binaries in %q (%s); none matched %q or %q — rerun with a plugin name matching one of them", pkg, npmBinDir, strings.Join(added, ", "), binName, name)
+		return "", fmt.Errorf("npm install of %q created multiple binaries in %q (%s); none matched %q or %q — rerun with a plugin name matching one of them", packageName, npmBinDir, strings.Join(added, ", "), binName, name)
 	}
 }
 
@@ -235,8 +235,8 @@ func fileExists(path string) bool {
 }
 
 // getNpmInstalledVersion returns the actual installed version of an npm package.
-func getNpmInstalledVersion(pkg string) (string, error) {
-	out, err := osexec.Command("npm", "list", "-g", pkg, "--json").Output()
+func getNpmInstalledVersion(packageName string) (string, error) {
+	output, err := osexec.Command("npm", "list", "-g", packageName, "--json").Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get npm package version: %w", err)
 	}
@@ -246,16 +246,16 @@ func getNpmInstalledVersion(pkg string) (string, error) {
 			Version string `json:"version"`
 		} `json:"dependencies"`
 	}
-	if err := json.Unmarshal(out, &result); err != nil {
+	if err := json.Unmarshal(output, &result); err != nil {
 		return "", fmt.Errorf("failed to parse npm list output: %w", err)
 	}
 
-	dep, ok := result.Dependencies[pkg]
+	dependency, ok := result.Dependencies[packageName]
 	if !ok {
-		return "", fmt.Errorf("package %s not found in npm list output", pkg)
+		return "", fmt.Errorf("package %s not found in npm list output", packageName)
 	}
-	if dep.Version == "" {
+	if dependency.Version == "" {
 		return "", fmt.Errorf("version not found in npm list output")
 	}
-	return dep.Version, nil
+	return dependency.Version, nil
 }

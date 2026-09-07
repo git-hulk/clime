@@ -2,7 +2,7 @@ VERSION ?= dev
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -s -w \
-	-X main.ver=$(VERSION) \
+	-X main.buildVersion=$(VERSION) \
 	-X main.gitCommit=$(GIT_COMMIT) \
 	-X main.buildDate=$(BUILD_DATE)
 

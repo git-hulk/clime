@@ -50,8 +50,8 @@ type skillFrontmatter struct {
 }
 
 // Find returns the entry with the given skill name.
-func (c *Catalog) Find(name string) (Entry, bool) {
-	for _, entry := range c.Skills {
+func (catalog *Catalog) Find(name string) (Entry, bool) {
+	for _, entry := range catalog.Skills {
 		if entry.Name == name {
 			return entry, true
 		}
@@ -108,14 +108,14 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 		return nil, err
 	}
 
-	var mf marketplaceFile
-	if err := json.Unmarshal(data, &mf); err != nil {
+	var marketplace marketplaceFile
+	if err := json.Unmarshal(data, &marketplace); err != nil {
 		return nil, fmt.Errorf("failed to parse marketplace.json: %w", err)
 	}
 
 	var catalog Catalog
 	seen := make(map[string]bool)
-	for _, plugin := range mf.Plugins {
+	for _, plugin := range marketplace.Plugins {
 		sourceDir := strings.TrimPrefix(plugin.Source, "./")
 		for _, skillPath := range plugin.Skills {
 			skillPath = strings.TrimPrefix(skillPath, "./")
@@ -141,15 +141,15 @@ func parsePluginManifest(dir string) (*Catalog, error) {
 		return nil, err
 	}
 
-	var pf pluginFile
-	if err := json.Unmarshal(data, &pf); err != nil {
+	var pluginManifest pluginFile
+	if err := json.Unmarshal(data, &pluginManifest); err != nil {
 		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
 	}
-	if pf.Skills == "" {
+	if pluginManifest.Skills == "" {
 		return nil, fmt.Errorf("plugin.json has no skills directory")
 	}
 
-	return readSkillsDir(dir, strings.TrimPrefix(pf.Skills, "./"))
+	return readSkillsDir(dir, strings.TrimPrefix(pluginManifest.Skills, "./"))
 }
 
 // readSkillsDir builds a catalog from the immediate subdirectories of skillsDir.
@@ -160,11 +160,11 @@ func readSkillsDir(dir, skillsDir string) (*Catalog, error) {
 	}
 
 	var catalog Catalog
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		catalog.Skills = append(catalog.Skills, entryFromSkillDir(dir, filepath.Join(skillsDir, e.Name())))
+		catalog.Skills = append(catalog.Skills, entryFromSkillDir(dir, filepath.Join(skillsDir, entry.Name())))
 	}
 	return &catalog, nil
 }
@@ -174,9 +174,9 @@ func readSkillsDir(dir, skillsDir string) (*Catalog, error) {
 // directory's basename.
 func entryFromSkillDir(dir, skillPath string) Entry {
 	entry := Entry{Path: skillPath}
-	if fm, err := readSkillFrontmatter(filepath.Join(dir, skillPath, "SKILL.md")); err == nil {
-		entry.Name = fm.Name
-		entry.Description = fm.Description
+	if frontmatter, err := readSkillFrontmatter(filepath.Join(dir, skillPath, "SKILL.md")); err == nil {
+		entry.Name = frontmatter.Name
+		entry.Description = frontmatter.Description
 	}
 	if entry.Name == "" {
 		entry.Name = filepath.Base(skillPath)
@@ -191,18 +191,18 @@ func parseSkillFrontmatter(data []byte) (*skillFrontmatter, error) {
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return nil, fmt.Errorf("no frontmatter found")
 	}
-	var fmLines []string
+	var frontmatterLines []string
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "---" {
 			break
 		}
-		fmLines = append(fmLines, line)
+		frontmatterLines = append(frontmatterLines, line)
 	}
-	var fm skillFrontmatter
-	if err := yaml.Unmarshal([]byte(strings.Join(fmLines, "\n")), &fm); err != nil {
+	var frontmatter skillFrontmatter
+	if err := yaml.Unmarshal([]byte(strings.Join(frontmatterLines, "\n")), &frontmatter); err != nil {
 		return nil, err
 	}
-	return &fm, nil
+	return &frontmatter, nil
 }
 
 // readSkillFrontmatter reads and parses the YAML frontmatter from a

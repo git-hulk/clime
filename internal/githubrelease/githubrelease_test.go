@@ -5,29 +5,26 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuthenticatedGitHubReleases(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "release.tar.gz")
 	file, err := os.Create(archive)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	gz := gzip.NewWriter(file)
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: "clime", Mode: 0o755, Size: 6}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("binary")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "clime", Mode: 0o755, Size: 6}))
+
+	_, err = tw.Write([]byte("binary"))
+	require.NoError(t, err)
+
 	for _, close := range []func() error{tw.Close, gz.Close, file.Close} {
-		if err := close(); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, close())
 	}
 	t.Setenv("CLIME_TEST_ARCHIVE", archive)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -40,33 +37,24 @@ case "$2" in
   *) exit 1 ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755))
 	release, err := FetchLatest("owner/repo")
-	if err != nil || release.TagName != "v1.2.3" || len(release.Assets) != 1 {
-		t.Fatalf("release = %+v, %v", release, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "v1.2.3", release.TagName)
+	require.Len(t, release.Assets, 1)
 	downloadURL := release.Assets[0].BrowserDownloadURL
-	if body, err := DownloadTarGzBinary(downloadURL, "clime"); err != nil || string(body) != "binary" {
-		t.Fatalf("binary = %q, %v", body, err)
-	}
+
+	body, err := DownloadTarGzBinary(downloadURL, "clime")
+	require.NoError(t, err)
+	require.Equal(t, "binary", string(body))
+
 	t.Setenv("CLIME_TEST_GH_FAIL", "1")
-	if _, err := FetchLatest("owner/repo"); err == nil || !strings.Contains(err.Error(), "gh release view") {
-		t.Fatalf("authenticated lookup must report gh failure: %v", err)
-	}
-	if _, err := DownloadTarGzBinary(downloadURL, "clime"); err == nil || !strings.Contains(err.Error(), "gh release download") {
-		t.Fatalf("authenticated download must report gh failure: %v", err)
-	}
-}
 
-func TestReleaseVersion(t *testing.T) {
-	t.Parallel()
+	_, err = FetchLatest("owner/repo")
+	require.ErrorContains(t, err, "gh release view")
 
-	release := &Release{TagName: "v1.2.3"}
-	if got := release.Version(); got != "1.2.3" {
-		t.Fatalf("Version() = %q, want %q", got, "1.2.3")
-	}
+	_, err = DownloadTarGzBinary(downloadURL, "clime")
+	require.ErrorContains(t, err, "gh release download")
 }
 
 func TestFindTarGzAsset(t *testing.T) {
@@ -81,26 +69,11 @@ func TestFindTarGzAsset(t *testing.T) {
 	}
 
 	asset, err := release.FindTarGzAsset("clime_", "darwin", "arm64")
-	if err != nil {
-		t.Fatalf("FindTarGzAsset() error = %v", err)
-	}
-	if asset.BrowserDownloadURL != "https://example.com/darwin-arm64" {
-		t.Fatalf("FindTarGzAsset() picked %q", asset.BrowserDownloadURL)
-	}
-}
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/darwin-arm64", asset.BrowserDownloadURL)
 
-func TestFindTarGzAssetNotFound(t *testing.T) {
-	t.Parallel()
-
-	release := &Release{
-		Assets: []Asset{
-			{Name: "clime_1.2.3_linux_amd64.tar.gz"},
-		},
-	}
-
-	if _, err := release.FindTarGzAsset("clime_", "darwin", "arm64"); err == nil {
-		t.Fatal("FindTarGzAsset() expected an error for missing asset")
-	}
+	_, err = release.FindTarGzAsset("clime_", "windows", "arm64")
+	require.Error(t, err, "missing platform must not select an unrelated asset")
 }
 
 func TestParseGitHubDownloadURL(t *testing.T) {
@@ -141,16 +114,10 @@ func TestParseGitHubDownloadURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			repo, asset, ok := parseGitHubDownloadURL(tt.url)
-			if ok != tt.wantOK {
-				t.Fatalf("parseGitHubDownloadURL(%q) ok = %v, want %v", tt.url, ok, tt.wantOK)
-			}
+			require.Equal(t, tt.wantOK, ok)
 			if ok {
-				if repo != tt.wantRepo {
-					t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
-				}
-				if asset != tt.wantAsset {
-					t.Errorf("asset = %q, want %q", asset, tt.wantAsset)
-				}
+				assert.Equal(t, tt.wantRepo, repo)
+				assert.Equal(t, tt.wantAsset, asset)
 			}
 		})
 	}

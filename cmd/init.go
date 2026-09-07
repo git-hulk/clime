@@ -81,9 +81,9 @@ plugin list when no URL has been recorded.`,
 		}
 		if len(toReinstall) > 0 {
 			terminal.Infof("Reinstalling %d plugin(s) due to install URL changes:", len(toReinstall))
-			for _, p := range toReinstall {
-				if entry, ok := manifest.Get(p.Name); ok {
-					fmt.Printf("  • %s: %s → %s\n", p.Name, entry.Source, p.Script)
+			for _, pluginConfig := range toReinstall {
+				if entry, ok := manifest.Get(pluginConfig.Name); ok {
+					fmt.Printf("  • %s: %s → %s\n", pluginConfig.Name, entry.Source, pluginConfig.Script)
 				}
 			}
 		}
@@ -91,7 +91,7 @@ plugin list when no URL has been recorded.`,
 
 		var failed []string
 
-		runInstall := func(p plugin.Plugin, reinstall bool) {
+		runInstall := func(pluginConfig plugin.Plugin, reinstall bool) {
 			verb := "Installing"
 			if reinstall {
 				verb = "Reinstalling"
@@ -100,44 +100,44 @@ plugin list when no URL has been recorded.`,
 			spinner := uicli.NewSpinner().
 				WithStyle(uicli.SpinnerDots).
 				WithColor(uicli.CyanColor).
-				WithMessage(fmt.Sprintf("%s %q...", verb, p.Name)).
+				WithMessage(fmt.Sprintf("%s %q...", verb, pluginConfig.Name)).
 				Start()
 
-			inst, err := installer.FromPlugin(p)
+			pluginInstaller, err := installer.FromPlugin(pluginConfig)
 			if err != nil {
-				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, err))
-				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, err))
+				spinner.Error(fmt.Sprintf("Failed to install %q: %v", pluginConfig.Name, err))
+				failed = append(failed, fmt.Sprintf("%s (%v)", pluginConfig.Name, err))
 				return
 			}
 
-			version, installErr := inst.Install(p.Name)
+			version, installErr := pluginInstaller.Install(pluginConfig.Name)
 			if installErr != nil {
-				spinner.Error(fmt.Sprintf("Failed to install %q: %v", p.Name, installErr))
-				failed = append(failed, fmt.Sprintf("%s (%v)", p.Name, installErr))
+				spinner.Error(fmt.Sprintf("Failed to install %q: %v", pluginConfig.Name, installErr))
+				failed = append(failed, fmt.Sprintf("%s (%v)", pluginConfig.Name, installErr))
 				return
 			}
 
-			manifest.Add(p.Name, version, inst.PluginType(), inst.Source(), "")
-			if p.Description != "" {
-				manifest.SetDescription(p.Name, p.Description)
+			manifest.Add(pluginConfig.Name, version, pluginInstaller.PluginType(), pluginInstaller.Source(), "")
+			if pluginConfig.Description != "" {
+				manifest.SetDescription(pluginConfig.Name, pluginConfig.Description)
 			}
 
 			doneVerb := "Installed"
 			if reinstall {
 				doneVerb = "Reinstalled"
 			}
-			if path, ok := plugin.Find(p.Name); ok {
-				spinner.Success(fmt.Sprintf("%s %q (%s)", doneVerb, p.Name, path))
+			if path, ok := plugin.Find(pluginConfig.Name); ok {
+				spinner.Success(fmt.Sprintf("%s %q (%s)", doneVerb, pluginConfig.Name, path))
 			} else {
-				spinner.Success(fmt.Sprintf("%s %q", doneVerb, p.Name))
+				spinner.Success(fmt.Sprintf("%s %q", doneVerb, pluginConfig.Name))
 			}
 		}
 
-		for _, p := range toInstall {
-			runInstall(p, false)
+		for _, pluginConfig := range toInstall {
+			runInstall(pluginConfig, false)
 		}
-		for _, p := range toReinstall {
-			runInstall(p, true)
+		for _, pluginConfig := range toReinstall {
+			runInstall(pluginConfig, true)
 		}
 
 		if err := manifest.Save(); err != nil {
@@ -162,9 +162,9 @@ func formatNames(names []string) string {
 }
 
 // isURL returns true if the given string looks like an HTTP(S) URL.
-func isURL(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
+func isURL(source string) bool {
+	parsedURL, err := url.Parse(source)
+	return err == nil && (parsedURL.Scheme == "http" || parsedURL.Scheme == "https")
 }
 
 // resolvePlugins returns the plugin list to install. URLs are fetched remotely,

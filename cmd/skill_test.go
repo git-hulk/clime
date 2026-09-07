@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInstallBundledSkillUsesSharedDirectory(t *testing.T) {
@@ -17,18 +19,14 @@ func TestInstallBundledSkillUsesSharedDirectory(t *testing.T) {
 			t.Setenv("HOME", home)
 			if withAgents {
 				for _, dir := range []string{".claude", ".codex"} {
-					if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
-						t.Fatal(err)
-					}
+					require.NoError(t, os.MkdirAll(filepath.Join(home, dir), 0o755))
 				}
 			}
 			oldContent, oldYAML := SkillContent, AgentYAML
 			SkillContent, AgentYAML = "# Clime", "display_name: Clime\n"
 			t.Cleanup(func() { SkillContent, AgentYAML = oldContent, oldYAML })
 
-			if err := installSkillCmd.RunE(installSkillCmd, nil); err != nil {
-				t.Fatalf("install skill: %v", err)
-			}
+			require.NoError(t, installSkillCmd.RunE(installSkillCmd, nil))
 			dirs := []string{".agents"}
 			if withAgents {
 				dirs = append(dirs, ".claude")
@@ -39,20 +37,20 @@ func TestInstallBundledSkillUsesSharedDirectory(t *testing.T) {
 					filepath.Join("agents", "openai.yaml"): AgentYAML,
 				} {
 					data, err := os.ReadFile(filepath.Join(home, dir, "skills", skillDirName, rel))
-					if err != nil || string(data) != want {
-						t.Fatalf("%s/%s = %q, %v, want %q", dir, rel, data, err, want)
-					}
+					require.NoError(t, err)
+					require.Equal(t, want, string(data))
 				}
 			}
 			if withAgents {
 				shared := filepath.Join(home, ".agents", "skills", skillDirName)
-				if got, err := os.Readlink(filepath.Join(home, ".claude", "skills", skillDirName)); err != nil || got != shared {
-					t.Fatalf("Claude link = %q, %v, want %q", got, err, shared)
-				}
+
+				got, err := os.Readlink(filepath.Join(home, ".claude", "skills", skillDirName))
+				require.NoError(t, err)
+				require.Equal(t, shared, got)
 			}
-			if _, err := os.Lstat(filepath.Join(home, ".codex", "skills")); !os.IsNotExist(err) {
-				t.Fatalf("install must not create ~/.codex/skills: %v", err)
-			}
+
+			_, err := os.Lstat(filepath.Join(home, ".codex", "skills"))
+			require.ErrorIs(t, err, os.ErrNotExist)
 		})
 	}
 }

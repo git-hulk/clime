@@ -17,14 +17,14 @@ var skillContent string
 var agentYAML string
 
 var (
-	ver       = "dev"
-	gitCommit = "unknown"
-	buildDate = "unknown"
+	buildVersion = "dev"
+	gitCommit    = "unknown"
+	buildDate    = "unknown"
 )
 
 func main() {
 	var terminal cmd.Terminal
-	version.Version = ver
+	version.Version = buildVersion
 	version.GitCommit = gitCommit
 	version.BuildDate = buildDate
 	cmd.SkillContent = skillContent

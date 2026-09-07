@@ -77,8 +77,8 @@ func Discover() []DiscoveredPlugin {
 	// Populate descriptions from the manifest
 	manifest, err := LoadManifest()
 	if err == nil {
-		for i, p := range plugins {
-			if entry, ok := manifest.Get(p.Name); ok && entry.Description != "" {
+		for i, discoveredPlugin := range plugins {
+			if entry, ok := manifest.Get(discoveredPlugin.Name); ok && entry.Description != "" {
 				plugins[i].Description = entry.Description
 			}
 		}

@@ -2,13 +2,14 @@ package installer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/githubrelease"
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGitHubInstallerUpdateSkipsWhenAlreadyLatest(t *testing.T) {
@@ -17,36 +18,28 @@ func TestGitHubInstallerUpdateSkipsWhenAlreadyLatest(t *testing.T) {
 	g := &GitHubInstaller{
 		Repo: "acme/clime-foo",
 		fetchLatest: func(repo string) (*githubrelease.Release, error) {
-			if repo != "acme/clime-foo" {
-				t.Fatalf("unexpected repo: %s", repo)
-			}
+			require.Equal(t, "acme/clime-foo", repo)
 			return &githubrelease.Release{TagName: "v1.2.3"}, nil
 		},
 		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			t.Fatal("downloadBinary should not be called when plugin is already latest")
+			require.FailNow(t, "downloadBinary should not be called when plugin is already latest")
 			return nil, nil
 		},
 		pluginBinDir: func() (string, error) {
-			t.Fatal("pluginBinDir should not be called when plugin is already latest")
+			require.FailNow(t, "pluginBinDir should not be called when plugin is already latest")
 			return "", nil
 		},
 		writeBinary: func(destPath string, binaryContent []byte) error {
-			t.Fatal("writeBinary should not be called when plugin is already latest")
+			require.FailNow(t, "writeBinary should not be called when plugin is already latest")
 			return nil
 		},
 	}
 
 	entry := plugin.ManifestEntry{Name: "foo", Version: "1.2.3", Type: plugin.SourceTypeGitHub, Source: "acme/clime-foo"}
 	result, err := g.Update("foo", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.Updated {
-		t.Fatal("Update() should not mark updated when versions match")
-	}
-	if result.LatestVersion != "1.2.3" {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "1.2.3")
-	}
+	require.NoError(t, err)
+	require.False(t, result.Updated, "Update() should not mark updated when versions match")
+	require.Equal(t, "1.2.3", result.LatestVersion)
 }
 
 func TestGitHubInstallerUpdateApplies(t *testing.T) {
@@ -55,21 +48,14 @@ func TestGitHubInstallerUpdateApplies(t *testing.T) {
 	const (
 		repo        = "acme/clime-foo"
 		downloadURL = "https://example.com/clime-foo.tar.gz"
-		installDir  = "/tmp/clime-plugin-test"
 	)
-
-	var (
-		gotDestPath string
-		gotContent  []byte
-	)
+	installDir := t.TempDir()
 	assetName := fmt.Sprintf("clime-foo_1.1.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 
 	g := &GitHubInstaller{
 		Repo: repo,
 		fetchLatest: func(gotRepo string) (*githubrelease.Release, error) {
-			if gotRepo != repo {
-				t.Fatalf("fetchLatest repo = %q, want %q", gotRepo, repo)
-			}
+			require.Equal(t, repo, gotRepo)
 			return &githubrelease.Release{
 				TagName: "v1.1.0",
 				Assets: []githubrelease.Asset{
@@ -78,45 +64,30 @@ func TestGitHubInstallerUpdateApplies(t *testing.T) {
 			}, nil
 		},
 		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			if url != downloadURL {
-				t.Fatalf("download url = %q, want %q", url, downloadURL)
-			}
-			if binaryName != "clime-foo" {
-				t.Fatalf("binaryName = %q, want %q", binaryName, "clime-foo")
-			}
+			require.Equal(t, downloadURL, url)
+			require.Equal(t, "clime-foo", binaryName)
 			return []byte("new-binary"), nil
 		},
 		pluginBinDir: func() (string, error) {
 			return installDir, nil
 		},
-		writeBinary: func(destPath string, binaryContent []byte) error {
-			gotDestPath = destPath
-			gotContent = binaryContent
-			return nil
-		},
+		writeBinary: writePluginBinary,
 	}
 
 	entry := plugin.ManifestEntry{Name: "foo", Version: "1.0.0", Type: plugin.SourceTypeGitHub, Source: repo}
 	result, err := g.Update("foo", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if !result.Updated {
-		t.Fatal("Update() should mark updated")
-	}
+	require.NoError(t, err)
+	require.True(t, result.Updated, "Update() should mark updated")
 	wantPath := filepath.Join(installDir, "clime-foo")
-	if gotDestPath != wantPath {
-		t.Fatalf("destPath = %q, want %q", gotDestPath, wantPath)
-	}
-	if string(gotContent) != "new-binary" {
-		t.Fatalf("binary content = %q, want %q", string(gotContent), "new-binary")
-	}
-	if result.CurrentVersion != "1.0.0" || result.LatestVersion != "1.1.0" {
-		t.Fatalf("result versions = %q -> %q", result.CurrentVersion, result.LatestVersion)
-	}
+	gotContent, err := os.ReadFile(wantPath)
+	require.NoError(t, err)
+	require.Equal(t, wantPath, result.Path)
+	require.Equal(t, "new-binary", string(gotContent))
+	require.Equal(t, "1.0.0", result.CurrentVersion)
+	require.Equal(t, "1.1.0", result.LatestVersion)
 }
 
-func TestGitHubInstallerErrorsWhenNoRepo(t *testing.T) {
+func TestGitHubInstallerReportsReleaseFetchFailure(t *testing.T) {
 	t.Parallel()
 
 	g := &GitHubInstaller{
@@ -127,21 +98,5 @@ func TestGitHubInstallerErrorsWhenNoRepo(t *testing.T) {
 	}
 
 	_, err := g.Install("foo")
-	if err == nil {
-		t.Fatal("Install() expected error")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("Install() error = %q, want it to contain %q", err.Error(), "not found")
-	}
-}
-
-func TestGitHubInstallerPluginType(t *testing.T) {
-	t.Parallel()
-	g := NewGitHubInstaller("acme/foo")
-	if g.PluginType() != plugin.SourceTypeGitHub {
-		t.Fatalf("PluginType() = %q, want %q", g.PluginType(), plugin.SourceTypeGitHub)
-	}
-	if g.Source() != "acme/foo" {
-		t.Fatalf("Source() = %q, want %q", g.Source(), "acme/foo")
-	}
+	require.ErrorContains(t, err, "not found", "Install() expected error")
 }

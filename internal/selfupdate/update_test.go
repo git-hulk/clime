@@ -1,10 +1,12 @@
 package selfupdate
 
 import (
-	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/githubrelease"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUpdateSkipsWhenAlreadyLatest(t *testing.T) {
@@ -12,21 +14,19 @@ func TestUpdateSkipsWhenAlreadyLatest(t *testing.T) {
 
 	u := &Updater{
 		fetchLatest: func(repo string) (*githubrelease.Release, error) {
-			if repo != "git-hulk/clime" {
-				t.Fatalf("unexpected repo: %s", repo)
-			}
+			require.Equal(t, "git-hulk/clime", repo)
 			return &githubrelease.Release{TagName: "v1.2.3"}, nil
 		},
 		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			t.Fatal("downloadBinary should not be called when already up-to-date")
+			require.FailNow(t, "downloadBinary should not be called when already up-to-date")
 			return nil, nil
 		},
 		resolveExecutablePath: func() (string, error) {
-			t.Fatal("resolveExecutablePath should not be called when already up-to-date")
+			require.FailNow(t, "resolveExecutablePath should not be called when already up-to-date")
 			return "", nil
 		},
 		replaceExecutable: func(destPath, binaryName string, binaryContent []byte) error {
-			t.Fatal("replaceExecutable should not be called when already up-to-date")
+			require.FailNow(t, "replaceExecutable should not be called when already up-to-date")
 			return nil
 		},
 	}
@@ -35,75 +35,61 @@ func TestUpdateSkipsWhenAlreadyLatest(t *testing.T) {
 		Repo:           "git-hulk/clime",
 		CurrentVersion: "1.2.3",
 	})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.Updated {
-		t.Fatal("Update() should not mark updated when versions match")
-	}
-	if result.LatestVersion != "1.2.3" {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, "1.2.3")
-	}
+	require.NoError(t, err)
+	require.False(t, result.Updated, "Update() should not mark updated when versions match")
+	require.Equal(t, "1.2.3", result.LatestVersion)
 }
 
-func TestUpdateAppliesBinary(t *testing.T) {
+func TestUpdateReplacesExecutable(t *testing.T) {
 	t.Parallel()
-
-	var replacedPath, replacedBinary string
-	var replacedContent []byte
-
-	u := &Updater{
-		fetchLatest: func(repo string) (*githubrelease.Release, error) {
-			return &githubrelease.Release{
-				TagName: "v1.2.4",
-				Assets: []githubrelease.Asset{
-					{
-						Name:               "clime_1.2.4_testos_testarch.tar.gz",
-						BrowserDownloadURL: "https://example.com/clime.tar.gz",
-					},
-				},
-			}, nil
-		},
-		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			if url != "https://example.com/clime.tar.gz" {
-				t.Fatalf("unexpected download url: %s", url)
+	for _, fail := range []bool{false, true} {
+		name := "success"
+		if fail {
+			name = "replacement fails"
+		}
+		t.Run(name, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "clime")
+			if fail {
+				// A directory cannot be replaced by the downloaded executable.
+				require.NoError(t, os.Mkdir(dest, 0o755))
+			} else {
+				require.NoError(t, os.WriteFile(dest, []byte("old-binary"), 0o755))
 			}
-			if binaryName != "clime" {
-				t.Fatalf("unexpected binaryName: %s", binaryName)
+			u := New()
+			u.fetchLatest = func(string) (*githubrelease.Release, error) {
+				return &githubrelease.Release{TagName: "v1.2.4", Assets: []githubrelease.Asset{{
+					Name:               "clime_1.2.4_testos_testarch.tar.gz",
+					BrowserDownloadURL: "https://example.com/clime.tar.gz",
+				}}}, nil
 			}
-			return []byte("binary-content"), nil
-		},
-		resolveExecutablePath: func() (string, error) {
-			return "/tmp/clime", nil
-		},
-		replaceExecutable: func(destPath, binaryName string, binaryContent []byte) error {
-			replacedPath = destPath
-			replacedBinary = binaryName
-			replacedContent = binaryContent
-			return nil
-		},
-	}
-
-	result, err := u.Update(Options{
-		Repo:           "git-hulk/clime",
-		CurrentVersion: "1.2.3",
-		TargetOS:       "testos",
-		TargetArch:     "testarch",
-	})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if !result.Updated {
-		t.Fatal("Update() should mark updated")
-	}
-	if replacedPath != "/tmp/clime" {
-		t.Fatalf("replace path = %q", replacedPath)
-	}
-	if replacedBinary != "clime" {
-		t.Fatalf("replace binary = %q", replacedBinary)
-	}
-	if string(replacedContent) != "binary-content" {
-		t.Fatalf("replace content = %q", string(replacedContent))
+			u.downloadBinary = func(url, binaryName string) ([]byte, error) {
+				require.Equal(t, "https://example.com/clime.tar.gz", url)
+				require.Equal(t, "clime", binaryName)
+				return []byte("binary-content"), nil
+			}
+			u.resolveExecutablePath = func() (string, error) { return dest, nil }
+			result, err := u.Update(Options{
+				Repo: "git-hulk/clime", CurrentVersion: "1.2.3",
+				TargetOS: "testos", TargetArch: "testarch",
+			})
+			if fail {
+				require.ErrorContains(t, err, "replace executable")
+				require.DirExists(t, dest)
+			} else {
+				require.NoError(t, err)
+				require.True(t, result.Updated)
+				require.Equal(t, dest, result.Path)
+				content, err := os.ReadFile(dest)
+				require.NoError(t, err)
+				require.Equal(t, "binary-content", string(content))
+				info, err := os.Stat(dest)
+				require.NoError(t, err)
+				require.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+			}
+			files, err := os.ReadDir(filepath.Dir(dest))
+			require.NoError(t, err)
+			require.Len(t, files, 1, "temporary downloads must be cleaned up")
+		})
 	}
 }
 
@@ -111,43 +97,7 @@ func TestUpdateValidation(t *testing.T) {
 	t.Parallel()
 
 	u := New()
-	if _, err := u.Update(Options{}); err == nil {
-		t.Fatal("Update() should fail when repo is empty")
-	}
-}
 
-func TestUpdatePropagatesReplaceError(t *testing.T) {
-	t.Parallel()
-
-	u := &Updater{
-		fetchLatest: func(repo string) (*githubrelease.Release, error) {
-			return &githubrelease.Release{
-				TagName: "v1.2.4",
-				Assets: []githubrelease.Asset{
-					{
-						Name:               "clime_1.2.4_testos_testarch.tar.gz",
-						BrowserDownloadURL: "https://example.com/clime.tar.gz",
-					},
-				},
-			}, nil
-		},
-		downloadBinary: func(url, binaryName string) ([]byte, error) {
-			return []byte("binary-content"), nil
-		},
-		resolveExecutablePath: func() (string, error) {
-			return "/tmp/clime", nil
-		},
-		replaceExecutable: func(destPath, binaryName string, binaryContent []byte) error {
-			return errors.New("permission denied")
-		},
-	}
-
-	if _, err := u.Update(Options{
-		Repo:           "git-hulk/clime",
-		CurrentVersion: "1.2.3",
-		TargetOS:       "testos",
-		TargetArch:     "testarch",
-	}); err == nil {
-		t.Fatal("Update() should propagate replace errors")
-	}
+	_, err := u.Update(Options{})
+	require.Error(t, err, "Update() should fail when repo is empty")
 }

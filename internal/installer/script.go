@@ -34,12 +34,12 @@ func NewScriptInstaller(scriptURL, binaryPath string) *ScriptInstaller {
 	}
 }
 
-func (s *ScriptInstaller) Install(name string) (string, error) {
-	if err := s.runScript(s.ScriptURL); err != nil {
+func (installer *ScriptInstaller) Install(name string) (string, error) {
+	if err := installer.runScript(installer.ScriptURL); err != nil {
 		return "", fmt.Errorf("install script failed: %w", err)
 	}
 
-	binaryPath := s.BinaryPath
+	binaryPath := installer.BinaryPath
 	if binaryPath != "" {
 		if strings.HasPrefix(binaryPath, "~/") {
 			home, err := os.UserHomeDir()
@@ -53,14 +53,14 @@ func (s *ScriptInstaller) Install(name string) (string, error) {
 		}
 	} else {
 		// Auto-detect binary on PATH by name
-		found, err := s.lookPath(name)
+		found, err := installer.lookPath(name)
 		if err != nil {
 			return "", fmt.Errorf("binary %q not found on PATH after install; use --binary-path to specify its location", name)
 		}
 		binaryPath = found
 	}
 
-	installDir, err := s.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return "", err
 	}
@@ -74,18 +74,18 @@ func (s *ScriptInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	version := s.DetectVersion(name)
+	version := installer.DetectVersion(name)
 	return version, nil
 }
 
-func (s *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
-	if err := s.runScript(s.ScriptURL); err != nil {
-		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", s.ScriptURL, err)
+func (installer *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
+	if err := installer.runScript(installer.ScriptURL); err != nil {
+		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", installer.ScriptURL, err)
 	}
 
-	version := s.DetectVersion(name)
+	version := installer.DetectVersion(name)
 
-	installDir, err := s.pluginBinDir()
+	installDir, err := installer.pluginBinDir()
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 
 	return &UpdateResult{
 		Name:           name,
-		Source:         s.ScriptURL,
+		Source:         installer.ScriptURL,
 		CurrentVersion: current.Version,
 		LatestVersion:  version,
 		Updated:        updated,
@@ -106,17 +106,17 @@ func (s *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*Up
 	}, nil
 }
 
-func (s *ScriptInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
+func (installer *ScriptInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
 	return removePluginBinaryAndTarget(name)
 }
 
-func (s *ScriptInstaller) DetectVersion(name string) string {
-	binPath, ok := s.findPlugin(name)
+func (installer *ScriptInstaller) DetectVersion(name string) string {
+	binPath, ok := installer.findPlugin(name)
 	if !ok {
 		return plugin.VersionLatest
 	}
 
-	output, err := s.runVersion(binPath)
+	output, err := installer.runVersion(binPath)
 	if err != nil {
 		return plugin.VersionLatest
 	}
@@ -124,8 +124,8 @@ func (s *ScriptInstaller) DetectVersion(name string) string {
 	return parseVersionOutput(output)
 }
 
-func (s *ScriptInstaller) PluginType() string { return plugin.SourceTypeScript }
-func (s *ScriptInstaller) Source() string     { return s.ScriptURL }
+func (installer *ScriptInstaller) PluginType() string { return plugin.SourceTypeScript }
+func (installer *ScriptInstaller) Source() string     { return installer.ScriptURL }
 
 // script helper functions
 
@@ -139,9 +139,9 @@ func runInstallScript(scriptURL string) error {
 
 func runPluginVersionCmd(binPath string) (string, error) {
 	for _, arg := range []string{"-v", "version", "-V"} {
-		out, err := osexec.Command(binPath, arg).CombinedOutput()
+		output, err := osexec.Command(binPath, arg).CombinedOutput()
 		if err == nil {
-			return string(out), nil
+			return string(output), nil
 		}
 	}
 	return "", fmt.Errorf("failed to detect version for %s", binPath)

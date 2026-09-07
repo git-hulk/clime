@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolveVersionLikeGoGet(t *testing.T) {
@@ -20,9 +23,7 @@ func TestResolveVersionLikeGoGet(t *testing.T) {
 	gitIn(t, remote, "tag", "2.0.0") // no "v" prefix: not semver, ignored like Go
 	gitIn(t, remote, "branch", "feature-x")
 
-	if err := os.WriteFile(filepath.Join(remote, "later.txt"), []byte("later"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(remote, "later.txt"), []byte("later"), 0o644))
 	gitIn(t, remote, "add", "-A")
 	gitIn(t, remote, "commit", "-m", "second")
 	headSHA := gitIn(t, remote, "rev-parse", "HEAD")
@@ -44,19 +45,15 @@ func TestResolveVersionLikeGoGet(t *testing.T) {
 
 	for _, tt := range tests {
 		got, err := resolveVersion(src, tt.query)
-		if err != nil {
-			t.Errorf("resolveVersion(%q) error = %v", tt.query, err)
+		if !assert.NoError(t, err, "resolveVersion(%q)", tt.query) {
 			continue
 		}
-		if got != tt.want {
-			t.Errorf("resolveVersion(%q) = %q, want %q", tt.query, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
 	}
 
 	for _, query := range []string{"v9", "no-such-ref", "deadbeefdead"} {
-		if got, err := resolveVersion(src, query); err == nil {
-			t.Errorf("resolveVersion(%q) = %q, want error", query, got)
-		}
+		_, err := resolveVersion(src, query)
+		assert.Error(t, err)
 	}
 }
 
@@ -68,12 +65,8 @@ func TestResolveVersionLatestWithoutSemverTags(t *testing.T) {
 	headSHA := gitIn(t, remote, "rev-parse", "HEAD")
 
 	got, err := resolveVersion(Source{Repo: remote}, "latest")
-	if err != nil {
-		t.Fatalf("resolveVersion(latest) error = %v", err)
-	}
-	if got != headSHA {
-		t.Fatalf("resolveVersion(latest) = %q, want default branch HEAD %q", got, headSHA)
-	}
+	require.NoError(t, err)
+	require.Equal(t, headSHA, got)
 }
 
 func TestResolveVersionLatestPrefersPrereleaseOverHead(t *testing.T) {
@@ -84,12 +77,8 @@ func TestResolveVersionLatestPrefersPrereleaseOverHead(t *testing.T) {
 	gitIn(t, remote, "tag", "v0.2.0-beta.1")
 
 	got, err := resolveVersion(Source{Repo: remote}, "latest")
-	if err != nil {
-		t.Fatalf("resolveVersion(latest) error = %v", err)
-	}
-	if got != "v0.2.0-beta.1" {
-		t.Fatalf("resolveVersion(latest) = %q, want highest prerelease %q", got, "v0.2.0-beta.1")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "v0.2.0-beta.1", got)
 }
 
 func TestResolveVersionFullSHASkipsNetwork(t *testing.T) {
@@ -97,10 +86,6 @@ func TestResolveVersionFullSHASkipsNetwork(t *testing.T) {
 
 	sha := strings.Repeat("ab12", 10)
 	got, err := resolveVersion(Source{Repo: "no-such-owner/no-such-repo"}, sha)
-	if err != nil {
-		t.Fatalf("resolveVersion() error = %v", err)
-	}
-	if got != sha {
-		t.Fatalf("resolveVersion() = %q, want %q", got, sha)
-	}
+	require.NoError(t, err)
+	require.Equal(t, sha, got)
 }

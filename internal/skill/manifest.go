@@ -29,12 +29,13 @@ type SourceRecord struct {
 	Version string `yaml:"version,omitempty"`
 }
 
-// Manifest is the persistent record at ~/.clime/skills.yaml: which skills
+// Manifest is the persistent record of which skills
 // are installed, from which sources, and the concrete version each source
 // is pinned to. Versions live on sources, never on skills.
 type Manifest struct {
 	Skills  []InstalledSkill `yaml:"skills"`
 	Sources []SourceRecord   `yaml:"sources,omitempty"`
+	path    string
 }
 
 func manifestPath() (string, error) {
@@ -45,41 +46,50 @@ func manifestPath() (string, error) {
 	return filepath.Join(home, ".clime", "skills.yaml"), nil
 }
 
-// LoadManifest reads the skills manifest from ~/.clime/skills.yaml.
+// LoadManifest reads the skills manifest from path, defaulting to
+// ~/.clime/skills.yaml when path is empty.
 // Creates the directory and an empty manifest file if they do not exist.
-func LoadManifest() (*Manifest, error) {
-	path, err := manifestPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine manifest path: %w", err)
+func LoadManifest(path string) (*Manifest, error) {
+	if path == "" {
+		var err error
+		path, err = manifestPath()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine manifest path: %w", err)
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			m := &Manifest{}
-			if err := m.Save(); err != nil {
+			manifest := &Manifest{path: path}
+			if err := manifest.Save(); err != nil {
 				return nil, fmt.Errorf("failed to create skills manifest: %w", err)
 			}
-			return m, nil
+			return manifest, nil
 		}
 		return nil, err
 	}
-	m, err := parseManifest(path, data)
+	manifest, err := parseManifest(path, data)
 	if err != nil {
 		return nil, err
 	}
-	return m, nil
+	return manifest, nil
 }
 
-// Save writes the manifest to disk.
-func (m *Manifest) Save() error {
-	path, err := manifestPath()
-	if err != nil {
-		return err
+// Save writes the manifest to its loaded path, or ~/.clime/skills.yaml
+// for a manifest constructed in memory.
+func (manifest *Manifest) Save() error {
+	path := manifest.path
+	if path == "" {
+		var err error
+		path, err = manifestPath()
+		if err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(m)
+	data, err := yaml.Marshal(manifest)
 	if err != nil {
 		return err
 	}
@@ -87,21 +97,21 @@ func (m *Manifest) Save() error {
 }
 
 // AddSkill adds or updates an installed skill entry.
-func (m *Manifest) AddSkill(s InstalledSkill) {
-	for i, existing := range m.Skills {
-		if existing.Name == s.Name {
-			m.Skills[i] = s
+func (manifest *Manifest) AddSkill(installedSkill InstalledSkill) {
+	for i, existing := range manifest.Skills {
+		if existing.Name == installedSkill.Name {
+			manifest.Skills[i] = installedSkill
 			return
 		}
 	}
-	m.Skills = append(m.Skills, s)
+	manifest.Skills = append(manifest.Skills, installedSkill)
 }
 
 // RemoveSkill removes an installed skill entry.
-func (m *Manifest) RemoveSkill(name string) bool {
-	for i, s := range m.Skills {
-		if s.Name == name {
-			m.Skills = append(m.Skills[:i], m.Skills[i+1:]...)
+func (manifest *Manifest) RemoveSkill(name string) bool {
+	for i, installedSkill := range manifest.Skills {
+		if installedSkill.Name == name {
+			manifest.Skills = append(manifest.Skills[:i], manifest.Skills[i+1:]...)
 			return true
 		}
 	}
@@ -109,64 +119,64 @@ func (m *Manifest) RemoveSkill(name string) bool {
 }
 
 // GetSkill returns an installed skill by name.
-func (m *Manifest) GetSkill(name string) (InstalledSkill, bool) {
-	for _, s := range m.Skills {
-		if s.Name == name {
-			return s, true
+func (manifest *Manifest) GetSkill(name string) (InstalledSkill, bool) {
+	for _, installedSkill := range manifest.Skills {
+		if installedSkill.Name == name {
+			return installedSkill, true
 		}
 	}
 	return InstalledSkill{}, false
 }
 
 // SkillsFrom returns the installed skills recorded from a source.
-func (m *Manifest) SkillsFrom(src Source) []InstalledSkill {
+func (manifest *Manifest) SkillsFrom(source Source) []InstalledSkill {
 	var installed []InstalledSkill
-	for _, s := range m.Skills {
-		if sameRepo(s.Source, src.Repo) {
-			installed = append(installed, s)
+	for _, installedSkill := range manifest.Skills {
+		if sameRepo(installedSkill.Source, source.Repo) {
+			installed = append(installed, installedSkill)
 		}
 	}
 	return installed
 }
 
 // sourceIndex returns the index of the record for a source repository, or -1.
-func (m *Manifest) sourceIndex(repo string) int {
-	return slices.IndexFunc(m.Sources, func(r SourceRecord) bool {
-		return sameRepo(r.Repo, repo)
+func (manifest *Manifest) sourceIndex(repo string) int {
+	return slices.IndexFunc(manifest.Sources, func(record SourceRecord) bool {
+		return sameRepo(record.Repo, repo)
 	})
 }
 
 // GetSource returns the recorded entry for a source.
-func (m *Manifest) GetSource(src Source) (SourceRecord, bool) {
-	if i := m.sourceIndex(src.Repo); i >= 0 {
-		return m.Sources[i], true
+func (manifest *Manifest) GetSource(source Source) (SourceRecord, bool) {
+	if i := manifest.sourceIndex(source.Repo); i >= 0 {
+		return manifest.Sources[i], true
 	}
 	return SourceRecord{}, false
 }
 
 // AddSource adds a source to the known sources list if not already
 // present, keeping the spelling of an existing entry.
-func (m *Manifest) AddSource(src Source) {
-	if m.sourceIndex(src.Repo) >= 0 {
+func (manifest *Manifest) AddSource(source Source) {
+	if manifest.sourceIndex(source.Repo) >= 0 {
 		return
 	}
-	m.Sources = append(m.Sources, SourceRecord{Repo: src.Repo})
+	manifest.Sources = append(manifest.Sources, SourceRecord{Repo: source.Repo})
 }
 
 // SetSourceVersion records the version a source's skills are installed
 // from, adding the source when it is not yet listed.
-func (m *Manifest) SetSourceVersion(src Source, version string) {
-	if i := m.sourceIndex(src.Repo); i >= 0 {
-		m.Sources[i].Version = version
+func (manifest *Manifest) SetSourceVersion(source Source, version string) {
+	if i := manifest.sourceIndex(source.Repo); i >= 0 {
+		manifest.Sources[i].Version = version
 		return
 	}
-	m.Sources = append(m.Sources, SourceRecord{Repo: src.Repo, Version: version})
+	manifest.Sources = append(manifest.Sources, SourceRecord{Repo: source.Repo, Version: version})
 }
 
 // RemoveSource removes a source from the known sources list.
-func (m *Manifest) RemoveSource(src Source) bool {
-	if i := m.sourceIndex(src.Repo); i >= 0 {
-		m.Sources = append(m.Sources[:i], m.Sources[i+1:]...)
+func (manifest *Manifest) RemoveSource(source Source) bool {
+	if i := manifest.sourceIndex(source.Repo); i >= 0 {
+		manifest.Sources = append(manifest.Sources[:i], manifest.Sources[i+1:]...)
 		return true
 	}
 	return false
@@ -174,23 +184,23 @@ func (m *Manifest) RemoveSource(src Source) bool {
 
 // InstalledSources lists the sources that have at least one installed
 // skill, in first-seen order and spelling.
-func (m *Manifest) InstalledSources() []Source {
-	repos := make([]string, 0, len(m.Skills))
-	for _, s := range m.Skills {
-		repos = append(repos, s.Source)
+func (manifest *Manifest) InstalledSources() []Source {
+	repos := make([]string, 0, len(manifest.Skills))
+	for _, installedSkill := range manifest.Skills {
+		repos = append(repos, installedSkill.Source)
 	}
 	return dedupeSources(repos)
 }
 
 // KnownSources lists the sources of installed skills followed by tracked
 // sources, preserving order and first-seen spelling.
-func (m *Manifest) KnownSources() []Source {
-	repos := make([]string, 0, len(m.Skills)+len(m.Sources))
-	for _, s := range m.Skills {
-		repos = append(repos, s.Source)
+func (manifest *Manifest) KnownSources() []Source {
+	repos := make([]string, 0, len(manifest.Skills)+len(manifest.Sources))
+	for _, installedSkill := range manifest.Skills {
+		repos = append(repos, installedSkill.Source)
 	}
-	for _, r := range m.Sources {
-		repos = append(repos, r.Repo)
+	for _, record := range manifest.Sources {
+		repos = append(repos, record.Repo)
 	}
 	return dedupeSources(repos)
 }

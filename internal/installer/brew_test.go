@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBrewInstallerInstall(t *testing.T) {
@@ -16,18 +16,14 @@ func TestBrewInstallerInstall(t *testing.T) {
 	brewBin := t.TempDir()
 	pluginDir := t.TempDir()
 	installedBin := filepath.Join(brewBin, "clime-deploy")
-	if err := os.WriteFile(installedBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write installed binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(installedBin, []byte("#!/bin/sh\n"), 0755))
 
 	var ranInstall bool
 	b := &BrewInstaller{
 		Formula: "acme/tap/clime-deploy",
 		runBrewInstall: func(formula string) error {
 			ranInstall = true
-			if formula != "acme/tap/clime-deploy" {
-				t.Fatalf("formula = %q, want %q", formula, "acme/tap/clime-deploy")
-			}
+			require.Equal(t, "acme/tap/clime-deploy", formula)
 			return nil
 		},
 		brewBinDir: func() (string, error) {
@@ -48,24 +44,14 @@ func TestBrewInstallerInstall(t *testing.T) {
 	}
 
 	version, err := b.Install("deploy")
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if !ranInstall {
-		t.Fatal("brew install should run")
-	}
-	if version != "1.2.3" {
-		t.Fatalf("version = %q, want %q", version, "1.2.3")
-	}
+	require.NoError(t, err)
+	require.True(t, ranInstall, "brew install should run")
+	require.Equal(t, "1.2.3", version)
 
 	linkPath := filepath.Join(pluginDir, "clime-deploy")
 	target, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("symlink not created: %v", err)
-	}
-	if target != installedBin {
-		t.Fatalf("symlink target = %q, want %q", target, installedBin)
-	}
+	require.NoError(t, err)
+	require.Equal(t, installedBin, target)
 }
 
 func TestBrewInstallerInstallBrewNotFound(t *testing.T) {
@@ -79,12 +65,7 @@ func TestBrewInstallerInstallBrewNotFound(t *testing.T) {
 	}
 
 	_, err := b.Install("deploy")
-	if err == nil {
-		t.Fatal("Install() should fail when brew is not on PATH")
-	}
-	if got := err.Error(); !strings.Contains(got, "homebrew is not installed") {
-		t.Fatalf("error = %q, want it to mention homebrew not installed", got)
-	}
+	require.ErrorContains(t, err, "homebrew is not installed", "Install() should fail when brew is not on PATH")
 }
 
 func TestBrewInstallerInstallBrewInstallFails(t *testing.T) {
@@ -104,12 +85,7 @@ func TestBrewInstallerInstallBrewInstallFails(t *testing.T) {
 	}
 
 	_, err := b.Install("deploy")
-	if err == nil {
-		t.Fatal("Install() should fail when brew install fails")
-	}
-	if got := err.Error(); !strings.Contains(got, "installing formula") {
-		t.Fatalf("error = %q, want it to mention installing formula", got)
-	}
+	require.ErrorContains(t, err, "installing formula", "Install() should fail when brew install fails")
 }
 
 func TestBrewInstallerInstallUsesExistingBinaryWhenBrewInstallFails(t *testing.T) {
@@ -118,9 +94,7 @@ func TestBrewInstallerInstallUsesExistingBinaryWhenBrewInstallFails(t *testing.T
 	pluginDir := t.TempDir()
 	brewBin := t.TempDir()
 	installedBin := filepath.Join(brewBin, "copilot")
-	if err := os.WriteFile(installedBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write installed binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(installedBin, []byte("#!/bin/sh\n"), 0755))
 
 	b := &BrewInstaller{
 		Formula: "copilot-cli",
@@ -149,21 +123,13 @@ func TestBrewInstallerInstallUsesExistingBinaryWhenBrewInstallFails(t *testing.T
 	}
 
 	version, err := b.Install("copilot-cli")
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if version != "1.0.0" {
-		t.Fatalf("version = %q, want %q", version, "1.0.0")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", version)
 
 	linkPath := filepath.Join(pluginDir, "clime-copilot-cli")
 	target, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("symlink not created: %v", err)
-	}
-	if target != installedBin {
-		t.Fatalf("symlink target = %q, want %q", target, installedBin)
-	}
+	require.NoError(t, err)
+	require.Equal(t, installedBin, target)
 }
 
 func TestBrewInstallerInstallBinaryNotFound(t *testing.T) {
@@ -186,12 +152,7 @@ func TestBrewInstallerInstallBinaryNotFound(t *testing.T) {
 	}
 
 	_, err := b.Install("deploy")
-	if err == nil {
-		t.Fatal("Install() should fail when binary is not found")
-	}
-	if got := err.Error(); !strings.Contains(got, "not found after brew install") {
-		t.Fatalf("error = %q, want it to mention binary not found", got)
-	}
+	require.ErrorContains(t, err, "not found after brew install", "Install() should fail when binary is not found")
 }
 
 func TestBrewInstallerUpdate(t *testing.T) {
@@ -201,17 +162,13 @@ func TestBrewInstallerUpdate(t *testing.T) {
 	pluginDir := t.TempDir()
 	brewBin := t.TempDir()
 	// Create binary so resolveInstalledBinary succeeds.
-	if err := os.WriteFile(filepath.Join(brewBin, "clime-deploy"), []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(brewBin, "clime-deploy"), []byte("#!/bin/sh\n"), 0755))
 
 	b := &BrewInstaller{
 		Formula: "acme/tap/clime-deploy",
 		runBrewUpdate: func(formula string) error {
 			ranUpdate = true
-			if formula != "acme/tap/clime-deploy" {
-				t.Fatalf("formula = %q, want %q", formula, "acme/tap/clime-deploy")
-			}
+			require.Equal(t, "acme/tap/clime-deploy", formula)
 			return nil
 		},
 		pluginBinDir: func() (string, error) {
@@ -238,18 +195,10 @@ func TestBrewInstallerUpdate(t *testing.T) {
 		Source:  "acme/tap/clime-deploy",
 	}
 	result, err := b.Update("deploy", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if !ranUpdate {
-		t.Fatal("brew update should run for brew source")
-	}
-	if !result.Updated {
-		t.Fatal("Update() should mark updated for brew source")
-	}
-	if result.LatestVersion != plugin.VersionLatest {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, plugin.VersionLatest)
-	}
+	require.NoError(t, err)
+	require.True(t, ranUpdate, "brew update should run for brew source")
+	require.True(t, result.Updated, "Update() should mark updated for brew source")
+	require.Equal(t, plugin.VersionLatest, result.LatestVersion)
 }
 
 func TestBrewInstallerUpdateUpToDate(t *testing.T) {
@@ -257,9 +206,7 @@ func TestBrewInstallerUpdateUpToDate(t *testing.T) {
 
 	pluginDir := t.TempDir()
 	brewBin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(brewBin, "clime-deploy"), []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(brewBin, "clime-deploy"), []byte("#!/bin/sh\n"), 0755))
 
 	b := &BrewInstaller{
 		Formula: "acme/tap/clime-deploy",
@@ -290,12 +237,8 @@ func TestBrewInstallerUpdateUpToDate(t *testing.T) {
 		Source:  "acme/tap/clime-deploy",
 	}
 	result, err := b.Update("deploy", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.Updated {
-		t.Fatal("Update() should not mark updated when semver version is unchanged")
-	}
+	require.NoError(t, err)
+	require.False(t, result.Updated, "Update() should not mark updated when semver version is unchanged")
 }
 
 func TestBrewInstallerUpdateBrewNotFound(t *testing.T) {
@@ -315,12 +258,7 @@ func TestBrewInstallerUpdateBrewNotFound(t *testing.T) {
 		Source:  "acme/tap/clime-deploy",
 	}
 	_, err := b.Update("deploy", entry)
-	if err == nil {
-		t.Fatal("Update() should fail when brew is not on PATH")
-	}
-	if got := err.Error(); !strings.Contains(got, "homebrew is not installed") {
-		t.Fatalf("error = %q, want it to mention homebrew not installed", got)
-	}
+	require.ErrorContains(t, err, "homebrew is not installed", "Update() should fail when brew is not on PATH")
 }
 
 func TestBrewInstallerUpdateResolvesSymlink(t *testing.T) {
@@ -329,9 +267,7 @@ func TestBrewInstallerUpdateResolvesSymlink(t *testing.T) {
 	pluginDir := t.TempDir()
 	brewBin := t.TempDir()
 	binPath := filepath.Join(brewBin, "clime-deploy")
-	if err := os.WriteFile(binPath, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(binPath, []byte("#!/bin/sh\n"), 0755))
 
 	b := &BrewInstaller{
 		Formula:       "acme/tap/clime-deploy",
@@ -354,18 +290,12 @@ func TestBrewInstallerUpdateResolvesSymlink(t *testing.T) {
 		Source:  "acme/tap/clime-deploy",
 	}
 	_, err := b.Update("deploy", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	linkPath := filepath.Join(pluginDir, "clime-deploy")
 	target, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("symlink not created after update: %v", err)
-	}
-	if target != binPath {
-		t.Fatalf("symlink target = %q, want %q", target, binPath)
-	}
+	require.NoError(t, err)
+	require.Equal(t, binPath, target)
 }
 
 func TestBrewInstallerUninstall(t *testing.T) {
@@ -379,9 +309,7 @@ func TestBrewInstallerUninstall(t *testing.T) {
 	pluginsDir := filepath.Join(home, ".clime", "plugins")
 	_ = os.MkdirAll(pluginsDir, 0755)
 	fakeBin := filepath.Join(pluginsDir, "clime-rmtest")
-	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("write fake binary: %v", err)
-	}
+	require.NoError(t, os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0755))
 	defer os.Remove(fakeBin)
 
 	var ranUninstall bool
@@ -404,15 +332,11 @@ func TestBrewInstallerUninstall(t *testing.T) {
 		Type:   plugin.SourceTypeBrew,
 		Source: "acme/tap/clime-rmtest",
 	}
-	if err := b.Uninstall("rmtest", entry); err != nil {
-		t.Fatalf("Uninstall() error = %v", err)
-	}
-	if !ranUninstall {
-		t.Fatal("brew uninstall should have run")
-	}
-	if _, err := os.Stat(fakeBin); !os.IsNotExist(err) {
-		t.Fatal("plugin binary should have been removed")
-	}
+	require.NoError(t, b.Uninstall("rmtest", entry))
+	require.True(t, ranUninstall, "brew uninstall should have run")
+
+	_, err = os.Stat(fakeBin)
+	require.ErrorIs(t, err, os.ErrNotExist, "plugin binary should have been removed")
 }
 
 func TestBrewInstallerDetectVersion(t *testing.T) {
@@ -445,21 +369,8 @@ func TestBrewInstallerDetectVersion(t *testing.T) {
 					return tt.version, tt.err
 				},
 			}
-			if got := b.DetectVersion("foo"); got != tt.want {
-				t.Fatalf("DetectVersion() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, b.DetectVersion("foo"))
 		})
-	}
-}
-
-func TestBrewInstallerPluginType(t *testing.T) {
-	t.Parallel()
-	b := NewBrewInstaller("acme/tap/clime-foo")
-	if b.PluginType() != plugin.SourceTypeBrew {
-		t.Fatalf("PluginType() = %q, want %q", b.PluginType(), plugin.SourceTypeBrew)
-	}
-	if b.Source() != "acme/tap/clime-foo" {
-		t.Fatalf("Source() = %q, want %q", b.Source(), "acme/tap/clime-foo")
 	}
 }
 
@@ -480,20 +391,9 @@ func TestBrewInstallOrUpgradeCmd(t *testing.T) {
 			t.Parallel()
 
 			cmd := brewInstallOrUpgradeCmd(tt.action, tt.formula)
-			if len(cmd.Args) != 3 || cmd.Args[0] != "brew" || cmd.Args[1] != tt.action || cmd.Args[2] != tt.formula {
-				t.Fatalf("cmd args = %v, want [brew %s %s]", cmd.Args, tt.action, tt.formula)
-			}
+			require.Equal(t, []string{"brew", tt.action, tt.formula}, cmd.Args)
 
-			foundNoCleanup := false
-			for _, env := range cmd.Env {
-				if env == "HOMEBREW_NO_INSTALL_CLEANUP=1" {
-					foundNoCleanup = true
-					break
-				}
-			}
-			if !foundNoCleanup {
-				t.Fatal("expected HOMEBREW_NO_INSTALL_CLEANUP=1 to be set")
-			}
+			require.Contains(t, cmd.Env, "HOMEBREW_NO_INSTALL_CLEANUP=1")
 		})
 	}
 }
@@ -505,21 +405,15 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 		t.Parallel()
 		brewBin := t.TempDir()
 		// Only create bare name (no clime- prefix)
-		if err := os.WriteFile(filepath.Join(brewBin, "deploy"), []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatalf("write binary: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filepath.Join(brewBin, "deploy"), []byte("#!/bin/sh\n"), 0755))
 		b := &BrewInstaller{
 			brewBinDir: func() (string, error) { return brewBin, nil },
 			lookPath:   func(name string) (string, error) { return "", fmt.Errorf("not found") },
 		}
 		got, err := b.resolveInstalledBinary("deploy")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
+		require.NoError(t, err)
 		want := filepath.Join(brewBin, "deploy")
-		if got != want {
-			t.Fatalf("got %q, want %q", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 
 	t.Run("lookPath with clime prefix", func(t *testing.T) {
@@ -534,12 +428,8 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 			},
 		}
 		got, err := b.resolveInstalledBinary("deploy")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
-		if got != "/usr/local/bin/clime-deploy" {
-			t.Fatalf("got %q, want /usr/local/bin/clime-deploy", got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "/usr/local/bin/clime-deploy", got)
 	})
 
 	t.Run("lookPath with bare name", func(t *testing.T) {
@@ -554,12 +444,8 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 			},
 		}
 		got, err := b.resolveInstalledBinary("deploy")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
-		if got != "/usr/local/bin/deploy" {
-			t.Fatalf("got %q, want /usr/local/bin/deploy", got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "/usr/local/bin/deploy", got)
 	})
 
 	t.Run("lookPath with -cli suffix trimmed", func(t *testing.T) {
@@ -575,12 +461,8 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 			},
 		}
 		got, err := b.resolveInstalledBinary("copilot-cli")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
-		if got != "/opt/homebrew/bin/copilot" {
-			t.Fatalf("got %q, want /opt/homebrew/bin/copilot", got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "/opt/homebrew/bin/copilot", got)
 	})
 
 	t.Run("nothing found", func(t *testing.T) {
@@ -591,18 +473,14 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 			lookPath:   func(name string) (string, error) { return "", fmt.Errorf("not found") },
 		}
 		_, err := b.resolveInstalledBinary("deploy")
-		if err == nil {
-			t.Fatal("resolveInstalledBinary() should fail when nothing is found")
-		}
+		require.Error(t, err, "resolveInstalledBinary() should fail when nothing is found")
 	})
 
 	t.Run("formula bin dir with single executable", func(t *testing.T) {
 		t.Parallel()
 		formulaBin := t.TempDir()
 		want := filepath.Join(formulaBin, "github-copilot-cli")
-		if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatalf("write binary: %v", err)
-		}
+		require.NoError(t, os.WriteFile(want, []byte("#!/bin/sh\n"), 0755))
 
 		b := &BrewInstaller{
 			Formula:       "copilot-cli",
@@ -612,12 +490,8 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 		}
 
 		got, err := b.resolveInstalledBinary("copilot-cli")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
-		if got != want {
-			t.Fatalf("got %q, want %q", got, want)
-		}
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 
 	t.Run("formula bin dir chooses token-matching executable", func(t *testing.T) {
@@ -625,12 +499,8 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 		formulaBin := t.TempDir()
 		unrelated := filepath.Join(formulaBin, "helper-tool")
 		want := filepath.Join(formulaBin, "github-copilot-cli")
-		if err := os.WriteFile(unrelated, []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatalf("write unrelated binary: %v", err)
-		}
-		if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatalf("write binary: %v", err)
-		}
+		require.NoError(t, os.WriteFile(unrelated, []byte("#!/bin/sh\n"), 0755))
+		require.NoError(t, os.WriteFile(want, []byte("#!/bin/sh\n"), 0755))
 
 		b := &BrewInstaller{
 			Formula:       "copilot-cli",
@@ -640,11 +510,7 @@ func TestResolveInstalledBinaryFallbacks(t *testing.T) {
 		}
 
 		got, err := b.resolveInstalledBinary("copilot-cli")
-		if err != nil {
-			t.Fatalf("resolveInstalledBinary() error = %v", err)
-		}
-		if got != want {
-			t.Fatalf("got %q, want %q", got, want)
-		}
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 }

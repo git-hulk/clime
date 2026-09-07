@@ -46,18 +46,18 @@ type UpdateResult struct {
 }
 
 // FromPlugin creates an Installer from a Plugin config entry (used by init and install commands).
-func FromPlugin(p plugin.Plugin) (Installer, error) {
+func FromPlugin(pluginConfig plugin.Plugin) (Installer, error) {
 	switch {
-	case p.Npm != "":
-		return NewNpmInstaller(p.Npm), nil
-	case p.Brew != "":
-		return NewBrewInstaller(p.Brew), nil
-	case p.Script != "":
-		return NewScriptInstaller(p.Script, p.BinaryPath), nil
-	case p.Repo != "":
-		return NewGitHubInstaller(p.Repo), nil
+	case pluginConfig.Npm != "":
+		return NewNpmInstaller(pluginConfig.Npm), nil
+	case pluginConfig.Brew != "":
+		return NewBrewInstaller(pluginConfig.Brew), nil
+	case pluginConfig.Script != "":
+		return NewScriptInstaller(pluginConfig.Script, pluginConfig.BinaryPath), nil
+	case pluginConfig.Repo != "":
+		return NewGitHubInstaller(pluginConfig.Repo), nil
 	default:
-		return nil, fmt.Errorf("plugin %q has no install source configured (set --repo, --npm, --brew, or --script)", p.Name)
+		return nil, fmt.Errorf("plugin %q has no install source configured (set --repo, --npm, --brew, or --script)", pluginConfig.Name)
 	}
 }
 
@@ -130,8 +130,8 @@ func writePluginBinary(destPath string, binaryContent []byte) error {
 	return os.WriteFile(destPath, binaryContent, 0755)
 }
 
-func normalizeVersion(v string) string {
-	return strings.TrimPrefix(strings.TrimSpace(v), "v")
+func normalizeVersion(version string) string {
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
 // parseVersionOutput extracts a version string from command output.
@@ -143,8 +143,8 @@ func parseVersionOutput(output string) string {
 		return plugin.VersionLatest
 	}
 
-	if m := semverRe.FindStringSubmatch(output); m != nil {
-		return m[1]
+	if matches := semverRe.FindStringSubmatch(output); matches != nil {
+		return matches[1]
 	}
 
 	if !strings.ContainsAny(output, " \t\n") {

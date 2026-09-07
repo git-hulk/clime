@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // skillRemote is a git repository used as a versioned skill source. Its
@@ -30,9 +32,7 @@ func newSkillRemote(t *testing.T) *skillRemote {
 // SKILL.md body, and tags the resulting commit.
 func (r *skillRemote) release(tag string, skills map[string]string) {
 	r.t.Helper()
-	if err := os.RemoveAll(filepath.Join(r.dir, "skills")); err != nil {
-		r.t.Fatal(err)
-	}
+	require.NoError(r.t, os.RemoveAll(filepath.Join(r.dir, "skills")))
 	catalog := "skills:\n"
 	for name, body := range skills {
 		writeFile(r.t, filepath.Join(r.dir, "skills", name, "SKILL.md"), body)
@@ -49,13 +49,9 @@ func newTestManager(t *testing.T, manifest *Manifest) (*Manager, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
 	targets, err := DetectTargets()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	return &Manager{
 		Manifest: manifest,
 		Store:    &Store{Root: filepath.Join(home, ".clime", "sources")},
@@ -66,9 +62,7 @@ func newTestManager(t *testing.T, manifest *Manifest) (*Manager, string) {
 func readInstalledSkill(t *testing.T, home, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(home, ".claude", "skills", name, "SKILL.md"))
-	if err != nil {
-		t.Fatalf("reading installed %s: %v", name, err)
-	}
+	require.NoError(t, err)
 	return string(data)
 }
 
@@ -84,65 +78,50 @@ func TestManagerInstallEndToEnd(t *testing.T) {
 
 	mgr, home := newTestManager(t, &Manifest{})
 	src, err := ParseSource(repoDir)
-	if err != nil {
-		t.Fatalf("ParseSource() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snap, catalog, err := mgr.Fetch(src)
-	if err != nil {
-		t.Fatalf("Fetch() error = %v", err)
-	}
-	if len(catalog.Skills) != 1 {
-		t.Fatalf("catalog = %+v, want 1 skill", catalog.Skills)
-	}
+	require.NoError(t, err)
+	require.Len(t, catalog.Skills, 1)
 
 	n, err := mgr.Install(snap, catalog.Skills)
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("Install() = %d, want 1", n)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
 
-	if got := readInstalledSkill(t, home, "alpha"); got != "# Alpha" {
-		t.Fatalf("SKILL.md = %q", got)
-	}
+	require.Equal(t, "# Alpha", readInstalledSkill(t, home, "alpha"))
 	shared := filepath.Join(home, ".agents", "skills", "alpha")
-	if got, err := os.Readlink(filepath.Join(home, ".claude", "skills", "alpha")); err != nil || got != shared {
-		t.Fatalf("Claude link = %q, %v, want %q", got, err, shared)
-	}
+
+	got, err := os.Readlink(filepath.Join(home, ".claude", "skills", "alpha"))
+	require.NoError(t, err)
+	require.Equal(t, shared, got)
+
 	extra, err := os.ReadFile(filepath.Join(home, ".claude", "skills", "alpha", "extra.txt"))
-	if err != nil || string(extra) != "extra" {
-		t.Fatalf("extra.txt = %q, %v", extra, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "extra", string(extra))
 
 	installed, ok := mgr.Manifest.GetSkill("alpha")
-	if !ok || installed.Source != repoDir || installed.Path != "skills/alpha" {
-		t.Fatalf("manifest entry = %+v", installed)
-	}
-	if record, ok := mgr.Manifest.GetSource(src); ok && record.Version != "" {
-		t.Fatalf("local source must not record a version, got %q", record.Version)
+	require.True(t, ok)
+	require.Equal(t, repoDir, installed.Source)
+	require.Equal(t, "skills/alpha", installed.Path)
+
+	record, ok := mgr.Manifest.GetSource(src)
+	if ok {
+		require.Empty(t, record.Version, "local source must not record a version")
 	}
 
 	removed, err := mgr.Uninstall("alpha")
-	if err != nil {
-		t.Fatalf("Uninstall() error = %v", err)
-	}
-	if len(removed) != 2 || removed[0] != "agents" || removed[1] != "claude" {
-		t.Fatalf("Uninstall() = %v, want [agents claude]", removed)
-	}
+	require.NoError(t, err)
+	require.Equal(t, []string{"agents", "claude"}, removed)
 	for _, dir := range []string{shared, filepath.Join(home, ".claude", "skills", "alpha")} {
-		if _, err := os.Lstat(dir); !os.IsNotExist(err) {
-			t.Fatalf("skill path %s still exists after Uninstall: %v", dir, err)
-		}
-	}
-	if _, ok := mgr.Manifest.GetSkill("alpha"); ok {
-		t.Fatal("manifest still lists the skill after Uninstall")
+		_, err := os.Lstat(dir)
+		require.ErrorIs(t, err, os.ErrNotExist)
 	}
 
-	if _, err := mgr.Uninstall("alpha"); err == nil {
-		t.Fatal("Uninstall() of a missing skill should fail")
-	}
+	_, ok = mgr.Manifest.GetSkill("alpha")
+	require.False(t, ok, "manifest still lists the skill after Uninstall")
+
+	_, err = mgr.Uninstall("alpha")
+	require.Error(t, err, "Uninstall() of a missing skill should fail")
 }
 
 func TestManagerInstallRequiresSkillMd(t *testing.T) {
@@ -153,15 +132,11 @@ func TestManagerInstallRequiresSkillMd(t *testing.T) {
 	snap := &Snapshot{Source: Source{Repo: repoDir}, Dir: repoDir}
 
 	n, err := mgr.Install(snap, []Entry{{Name: "broken", Path: "skills/broken"}})
-	if err == nil {
-		t.Fatal("Install() should fail for a skill without SKILL.md")
-	}
-	if n != 0 {
-		t.Fatalf("Install() = %d, want 0", n)
-	}
-	if _, ok := mgr.Manifest.GetSkill("broken"); ok {
-		t.Fatal("failed install must not be recorded in the manifest")
-	}
+	require.Error(t, err, "Install() should fail for a skill without SKILL.md")
+	require.Equal(t, 0, n)
+
+	_, ok := mgr.Manifest.GetSkill("broken")
+	require.False(t, ok, "failed install must not be recorded in the manifest")
 }
 
 func TestManagerInstallUsesLockedCacheOffline(t *testing.T) {
@@ -175,25 +150,20 @@ func TestManagerInstallUsesLockedCacheOffline(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "# cached alpha")
 
 			snap, catalog, err := mgr.Fetch(src)
-			if err != nil {
-				t.Fatalf("Fetch() offline error = %v", err)
-			}
-			if snap.Version != version || snap.Dir != dir {
-				t.Fatalf("snapshot = %+v, want cached version %s at %s", snap, version, dir)
-			}
-			if n, err := mgr.Install(snap, catalog.Skills); err != nil || n != 1 {
-				t.Fatalf("Install() = (%d, %v), want (1, nil)", n, err)
-			}
-			if got := readInstalledSkill(t, home, "alpha"); got != "# cached alpha" {
-				t.Fatalf("installed content = %q, want cached content", got)
-			}
-			saved, err := LoadManifest()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if record, _ := saved.GetSource(src); record.Version != version {
-				t.Fatalf("install changed the lock to %q, want %q", record.Version, version)
-			}
+			require.NoError(t, err)
+			require.Equal(t, version, snap.Version)
+			require.Equal(t, dir, snap.Dir)
+
+			n, err := mgr.Install(snap, catalog.Skills)
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+
+			require.Equal(t, "# cached alpha", readInstalledSkill(t, home, "alpha"))
+			saved, err := LoadManifest("")
+			require.NoError(t, err)
+
+			record, _ := saved.GetSource(src)
+			require.Equal(t, version, record.Version)
 		})
 	}
 }
@@ -220,18 +190,14 @@ func TestManagerFetchHonorsQueriesAndFetchesMissingVersions(t *testing.T) {
 			}
 			mgr, _ := newTestManager(t, manifest)
 			snap, catalog, err := mgr.Fetch(src)
-			if err != nil {
-				t.Fatalf("Fetch() error = %v", err)
-			}
-			if snap.Version != tt.want {
-				t.Fatalf("version = %q, want %q", snap.Version, tt.want)
-			}
-			if _, ok := catalog.Find("alpha"); !ok {
-				t.Fatal("fetched catalog does not contain alpha")
-			}
-			if record, _ := manifest.GetSource(src); record.Version != tt.locked {
-				t.Fatalf("browsing changed the lock to %q, want %q", record.Version, tt.locked)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, snap.Version)
+
+			_, ok := catalog.Find("alpha")
+			require.True(t, ok, "fetched catalog does not contain alpha")
+
+			record, _ := manifest.GetSource(src)
+			require.Equal(t, tt.locked, record.Version)
 		})
 	}
 }
@@ -246,15 +212,14 @@ func TestManagerInstallWithoutTargets(t *testing.T) {
 	mgr.Events = events
 
 	snap := &Snapshot{Source: Source{Repo: repoDir}, Dir: repoDir}
-	if _, err := mgr.Install(snap, []Entry{{Name: "alpha", Path: "skills/alpha"}}); err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if !events.noTargets {
-		t.Fatal("expected NoTargets event")
-	}
-	if _, ok := mgr.Manifest.GetSkill("alpha"); ok {
-		t.Fatal("a skill installed nowhere must not be recorded")
-	}
+
+	_, err := mgr.Install(snap, []Entry{{Name: "alpha", Path: "skills/alpha"}})
+	require.NoError(t, err)
+
+	require.True(t, events.noTargets, "expected NoTargets event")
+
+	_, ok := mgr.Manifest.GetSkill("alpha")
+	require.False(t, ok, "a skill installed nowhere must not be recorded")
 }
 
 type recordingEvents struct {
@@ -281,63 +246,43 @@ func TestSyncKeepsLockedVersionWhileUpdateFollowsLatest(t *testing.T) {
 		return record.Version
 	}
 
-	if _, err := mgr.Sync(src); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
-	if got := readInstalledSkill(t, home, "test-skill"); got != "# v1" {
-		t.Fatalf("after sync, SKILL.md = %q, want the locked v1.0.0 content", got)
-	}
+	_, err := mgr.Sync(src)
+	require.NoError(t, err)
+
+	require.Equal(t, "# v1", readInstalledSkill(t, home, "test-skill"))
 
 	remote.release("v2.0.0", map[string]string{"test-skill": "# v2"})
 
-	if _, err := mgr.Sync(src); err != nil {
-		t.Fatalf("Sync() after upstream release error = %v", err)
-	}
-	if got := readInstalledSkill(t, home, "test-skill"); got != "# v1" {
-		t.Fatalf("sync must not pick up a newer release, SKILL.md = %q", got)
-	}
-	if got := sourceVersion(); got != "v1.0.0" {
-		t.Fatalf("sync changed the locked version to %q", got)
-	}
+	_, err = mgr.Sync(src)
+	require.NoError(t, err)
 
-	if _, err := mgr.Update(src); err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if got := readInstalledSkill(t, home, "test-skill"); got != "# v2" {
-		t.Fatalf("after update, SKILL.md = %q, want the v2.0.0 content", got)
-	}
-	if got := sourceVersion(); got != "v2.0.0" {
-		t.Fatalf("after update, locked version = %q, want v2.0.0", got)
-	}
-	if dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")) {
-		t.Fatal("successful update must remove the old snapshot")
-	}
-	if !dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")) {
-		t.Fatal("successful update must keep the installed snapshot")
-	}
+	require.Equal(t, "# v1", readInstalledSkill(t, home, "test-skill"))
+	require.Equal(t, "v1.0.0", sourceVersion())
+
+	_, err = mgr.Update(src)
+	require.NoError(t, err)
+
+	require.Equal(t, "# v2", readInstalledSkill(t, home, "test-skill"))
+	require.Equal(t, "v2.0.0", sourceVersion())
+	require.False(t, dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")), "successful update must remove the old snapshot")
+	require.True(t, dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")), "successful update must keep the installed snapshot")
 
 	events := &recordingEvents{}
 	mgr.Events = events
-	if n, err := mgr.Update(src); err != nil || n != 0 {
-		t.Fatalf("Update() when already at latest = (%d, %v), want (0, nil)", n, err)
-	}
-	if events.upToDate != "v2.0.0" {
-		t.Fatalf("expected SourceUpToDate(v2.0.0), got %q", events.upToDate)
-	}
+
+	n, err := mgr.Update(src)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+
+	require.Equal(t, "v2.0.0", events.upToDate)
 	mgr.Events = nil
 
-	if _, err := mgr.Update(src.WithQuery("v1.0.0")); err != nil {
-		t.Fatalf("Update() to an explicit older version error = %v", err)
-	}
-	if got := readInstalledSkill(t, home, "test-skill"); got != "# v1" {
-		t.Fatalf("after pinning v1.0.0, SKILL.md = %q", got)
-	}
-	if got := sourceVersion(); got != "v1.0.0" {
-		t.Fatalf("after pinning v1.0.0, locked version = %q", got)
-	}
-	if dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")) {
-		t.Fatal("successful downgrade must remove the superseded snapshot")
-	}
+	_, err = mgr.Update(src.WithQuery("v1.0.0"))
+	require.NoError(t, err)
+
+	require.Equal(t, "# v1", readInstalledSkill(t, home, "test-skill"))
+	require.Equal(t, "v1.0.0", sourceVersion())
+	require.False(t, dirExists(versionDir(mgr.Store.repoDir(src), "v2.0.0")), "successful downgrade must remove the superseded snapshot")
 }
 
 func TestUpdateRefusesWhenCatalogDropsInstalledSkill(t *testing.T) {
@@ -354,34 +299,23 @@ func TestUpdateRefusesWhenCatalogDropsInstalledSkill(t *testing.T) {
 	mgr, home := newTestManager(t, manifest)
 	src := Source{Repo: remote.URL}
 
-	if _, err := mgr.Sync(src); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	_, err := mgr.Sync(src)
+	require.NoError(t, err)
 
 	remote.release("v2.0.0", map[string]string{"alpha": "# alpha v2"})
 
-	_, err := mgr.Update(src)
-	if err == nil {
-		t.Fatal("Update() should fail when the new catalog drops an installed skill")
-	}
-	if !strings.Contains(err.Error(), "beta") {
-		t.Fatalf("error = %v, want it to name the missing skill", err)
-	}
-	if got := readInstalledSkill(t, home, "alpha"); got != "# alpha v1" {
-		t.Fatalf("a refused update must leave targets unchanged, alpha = %q", got)
-	}
-	if got := readInstalledSkill(t, home, "beta"); got != "# beta v1" {
-		t.Fatalf("a refused update must not remove beta, got %q", got)
-	}
-	if record, _ := manifest.GetSource(src); record.Version != "v1.0.0" {
-		t.Fatalf("a refused update must keep the locked version, got %q", record.Version)
-	}
-	if _, ok := manifest.GetSkill("beta"); !ok {
-		t.Fatal("a refused update must keep beta in the manifest")
-	}
-	if !dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")) {
-		t.Fatal("a refused update must keep the old snapshot")
-	}
+	_, err = mgr.Update(src)
+	require.ErrorContains(t, err, "beta", "Update() should fail when the new catalog drops an installed skill")
+	require.Equal(t, "# alpha v1", readInstalledSkill(t, home, "alpha"))
+	require.Equal(t, "# beta v1", readInstalledSkill(t, home, "beta"))
+
+	record, _ := manifest.GetSource(src)
+	require.Equal(t, "v1.0.0", record.Version)
+
+	_, ok := manifest.GetSkill("beta")
+	require.True(t, ok, "a refused update must keep beta in the manifest")
+
+	require.True(t, dirExists(versionDir(mgr.Store.repoDir(src), "v1.0.0")), "a refused update must keep the old snapshot")
 }
 
 func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T) {
@@ -397,9 +331,10 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 						Sources: []SourceRecord{{Repo: src.Repo, Version: "v1.0.0"}},
 					}
 					mgr, home := newTestManager(t, manifest)
-					if _, err := mgr.Sync(src); err != nil {
-						t.Fatal(err)
-					}
+
+					_, err := mgr.Sync(src)
+					require.NoError(t, err)
+
 					base := mgr.Store.repoDir(src)
 					stale := versionDir(base, "v0.1.0")
 					other := versionDir(base+"-other", "v1.0.0")
@@ -408,22 +343,17 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 					}
 					remote.release("v2.0.0", map[string]string{"alpha": "# v2"})
 					snap, catalog, err := mgr.Fetch(src.WithQuery("v2.0.0"))
-					if err != nil {
-						t.Fatal(err)
-					}
+					require.NoError(t, err)
 					if verb == VerbSync {
 						manifest.SetSourceVersion(src, "v2.0.0")
-						if err := manifest.Save(); err != nil {
-							t.Fatal(err)
-						}
+						require.NoError(t, manifest.Save())
 					}
 					if verb == VerbInstall {
-						if n, err := mgr.Install(snap, nil); err != nil || n != 0 {
-							t.Fatalf("Install() with no entries = (%d, %v), want (0, nil)", n, err)
-						}
-						if !dirExists(stale) {
-							t.Fatal("install with no entries must retain old snapshots")
-						}
+						n, err := mgr.Install(snap, nil)
+						require.NoError(t, err)
+						require.Equal(t, 0, n)
+
+						require.True(t, dirExists(stale), "install with no entries must retain old snapshots")
 					}
 					switch failure {
 					case "target":
@@ -433,15 +363,9 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 						mgr.Targets[1].Dir = blocked
 					case "manifest":
 						path, err := manifestPath()
-						if err != nil {
-							t.Fatal(err)
-						}
-						if err := os.Remove(path); err != nil {
-							t.Fatal(err)
-						}
-						if err := os.Mkdir(path, 0o755); err != nil {
-							t.Fatal(err)
-						}
+						require.NoError(t, err)
+						require.NoError(t, os.Remove(path))
+						require.NoError(t, os.Mkdir(path, 0o755))
 					case "no targets":
 						mgr.Targets = nil
 					}
@@ -454,29 +378,24 @@ func TestSkillOperationsPruneSnapshotsOnlyAfterInstallationSucceeds(t *testing.T
 						_, err = mgr.Sync(src)
 					}
 					wantErr := failure == "target" || failure == "manifest"
-					if (err != nil) != wantErr {
-						t.Fatalf("%s error = %v, want error: %v", verb, err, wantErr)
+					if wantErr {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
 					}
 					for _, dir := range []string{stale, versionDir(base, "v1.0.0")} {
-						if got, want := dirExists(dir), failure != "success"; got != want {
-							t.Fatalf("snapshot %s exists = %v, want %v", dir, got, want)
-						}
+						require.Equal(t, failure != "success", dirExists(dir), "snapshot %s", dir)
 					}
 					for _, dir := range []string{other, versionDir(base, "v2.0.0")} {
-						if !dirExists(dir) {
-							t.Fatalf("snapshot %s must be retained", dir)
-						}
+						require.True(t, dirExists(dir), "snapshot %s must be retained", dir)
 					}
 					if failure == "success" {
-						if err := os.Rename(remote.dir, filepath.Join(t.TempDir(), "offline")); err != nil {
-							t.Fatal(err)
-						}
-						if _, err := mgr.Sync(src); err != nil {
-							t.Fatalf("Sync() offline after cleanup: %v", err)
-						}
-						if got := readInstalledSkill(t, home, "alpha"); got != "# v2" {
-							t.Fatalf("offline sync installed %q, want # v2", got)
-						}
+						require.NoError(t, os.Rename(remote.dir, filepath.Join(t.TempDir(), "offline")))
+
+						_, err := mgr.Sync(src)
+						require.NoError(t, err)
+
+						require.Equal(t, "# v2", readInstalledSkill(t, home, "alpha"))
 					}
 				})
 			}
@@ -495,13 +414,12 @@ func TestSyncBackfillsMissingSourceVersion(t *testing.T) {
 	mgr, home := newTestManager(t, manifest)
 	src := Source{Repo: remote.URL}
 
-	if _, err := mgr.Sync(src); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
-	if got := readInstalledSkill(t, home, "test-skill"); got != "# v1" {
-		t.Fatalf("SKILL.md = %q", got)
-	}
-	if record, ok := manifest.GetSource(src); !ok || record.Version != "v1.0.0" {
-		t.Fatalf("source record = (%+v, %v), want the resolved version recorded", record, ok)
-	}
+	_, err := mgr.Sync(src)
+	require.NoError(t, err)
+
+	require.Equal(t, "# v1", readInstalledSkill(t, home, "test-skill"))
+
+	record, ok := manifest.GetSource(src)
+	require.True(t, ok)
+	require.Equal(t, "v1.0.0", record.Version)
 }

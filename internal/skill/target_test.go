@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetectTargets(t *testing.T) {
@@ -11,79 +13,52 @@ func TestDetectTargets(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	targets, err := DetectTargets()
-	if err != nil {
-		t.Fatalf("DetectTargets() error = %v", err)
-	}
-	if len(targets) != 1 || targets[0].Name != "agents" {
-		t.Fatalf("targets = %v, want [agents] in an empty home", targets)
-	}
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, "agents", targets[0].Name)
 
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
 	targets, err = DetectTargets()
-	if err != nil {
-		t.Fatalf("DetectTargets() error = %v", err)
-	}
-	if len(targets) != 2 || targets[0].Name != "agents" || targets[1].Name != "claude" {
-		t.Fatalf("targets = %v, want [agents claude]", targets)
-	}
+	require.NoError(t, err)
+	require.Len(t, targets, 2)
+	require.Equal(t, "agents", targets[0].Name)
+	require.Equal(t, "claude", targets[1].Name)
 
-	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
 	targets, err = DetectTargets()
-	if err != nil {
-		t.Fatalf("DetectTargets() error = %v", err)
-	}
-	if len(targets) != 2 || targets[0].Name != "agents" || targets[1].Name != "claude" {
-		t.Fatalf("targets = %v, want [agents claude] even with Codex present", targets)
-	}
+	require.NoError(t, err)
+	require.Len(t, targets, 2)
+	require.Equal(t, "agents", targets[0].Name)
+	require.Equal(t, "claude", targets[1].Name)
 }
 
 func TestTargetInstallAndRemove(t *testing.T) {
 	target := Target{Name: "agents", Dir: filepath.Join(t.TempDir(), ".agents")}
-	if err := os.MkdirAll(target.Dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(target.Dir, 0o755))
 
 	files := map[string][]byte{
 		"SKILL.md":                       []byte("# Skill"),
 		"helper.sh":                      []byte("#!/bin/bash\necho hello"),
 		filepath.Join("sub", "nest.txt"): []byte("nested"),
 	}
-	if err := target.Install("test-skill", files); err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
+	require.NoError(t, target.Install("test-skill", files))
 
 	for rel, want := range files {
 		got, err := os.ReadFile(filepath.Join(target.Dir, "skills", "test-skill", rel))
-		if err != nil {
-			t.Fatalf("reading %s: %v", rel, err)
-		}
-		if string(got) != string(want) {
-			t.Fatalf("%s = %q, want %q", rel, got, want)
-		}
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(got))
 	}
 
 	removed, err := target.Remove("test-skill")
-	if err != nil {
-		t.Fatalf("Remove() error = %v", err)
-	}
-	if !removed {
-		t.Fatal("Remove() = false, want true for an installed skill")
-	}
-	if _, err := os.Stat(filepath.Join(target.Dir, "skills", "test-skill")); !os.IsNotExist(err) {
-		t.Fatal("skill directory still exists after Remove")
-	}
+	require.NoError(t, err)
+	require.True(t, removed, "Remove() = false, want true for an installed skill")
+
+	_, err = os.Stat(filepath.Join(target.Dir, "skills", "test-skill"))
+	require.ErrorIs(t, err, os.ErrNotExist, "skill directory still exists after Remove")
 
 	removed, err = target.Remove("test-skill")
-	if err != nil {
-		t.Fatalf("Remove() second call error = %v", err)
-	}
-	if removed {
-		t.Fatal("Remove() = true for a skill that is not installed")
-	}
+	require.NoError(t, err)
+	require.False(t, removed, "Remove() = true for a skill that is not installed")
 }
 
 func TestClaudeInstallLinksSharedSkill(t *testing.T) {
@@ -93,13 +68,9 @@ func TestClaudeInstallLinksSharedSkill(t *testing.T) {
 			shared := Target{Name: "agents", Dir: filepath.Join(home, ".agents")}
 			claude := Target{Name: "claude", Dir: filepath.Join(home, ".claude")}
 			files := map[string][]byte{"SKILL.md": []byte("# Shared")}
-			if err := shared.Install("test-skill", files); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, shared.Install("test-skill", files))
 			link := claude.skillDir("test-skill")
-			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
 			other := filepath.Join(home, "other")
 			switch existing {
 			case "directory":
@@ -112,37 +83,30 @@ func TestClaudeInstallLinksSharedSkill(t *testing.T) {
 				if existing == "other link" {
 					writeFile(t, filepath.Join(other, "SKILL.md"), "# Other")
 				}
-				if err := os.Symlink(dest, link); err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, os.Symlink(dest, link))
 			}
 
-			if err := claude.Install("test-skill", files); err != nil {
-				t.Fatalf("Install() error = %v", err)
-			}
-			if got, err := os.Readlink(link); err != nil || got != shared.skillDir("test-skill") {
-				t.Fatalf("Claude link = %q, %v", got, err)
-			}
+			require.NoError(t, claude.Install("test-skill", files))
+
+			got, err := os.Readlink(link)
+			require.NoError(t, err)
+			require.Equal(t, shared.skillDir("test-skill"), got)
+
 			files["SKILL.md"] = []byte("# Updated")
-			if err := shared.Install("test-skill", files); err != nil {
-				t.Fatal(err)
-			}
-			if got := readInstalledSkill(t, home, "test-skill"); got != "# Updated" {
-				t.Fatalf("Claude content = %q, want updated shared content", got)
-			}
+			require.NoError(t, shared.Install("test-skill", files))
+			require.Equal(t, "# Updated", readInstalledSkill(t, home, "test-skill"))
 			if existing == "other link" {
 				data, err := os.ReadFile(filepath.Join(other, "SKILL.md"))
-				if err != nil || string(data) != "# Other" {
-					t.Fatalf("previous link target changed: %q, %v", data, err)
-				}
+				require.NoError(t, err)
+				require.Equal(t, "# Other", string(data))
 			}
 
-			if removed, err := claude.Remove("test-skill"); err != nil || !removed {
-				t.Fatalf("Remove() = %v, %v", removed, err)
-			}
-			if _, err := os.Stat(shared.skillDir("test-skill")); err != nil {
-				t.Fatalf("removing Claude link removed shared files: %v", err)
-			}
+			removed, err := claude.Remove("test-skill")
+			require.NoError(t, err)
+			require.True(t, removed)
+
+			_, err = os.Stat(shared.skillDir("test-skill"))
+			require.NoError(t, err)
 		})
 	}
 }

@@ -1,27 +1,24 @@
 package plugin
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestManifestPersistsInitURL(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	want := "https://example.com/plugins.yaml"
-	if err := (&Manifest{InitURL: want}).Save(); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
+	require.NoError(t, (&Manifest{InitURL: want}).Save())
 
 	got, err := LoadManifest()
-	if err != nil {
-		t.Fatalf("LoadManifest() error = %v", err)
-	}
-	if got.InitURL != want {
-		t.Errorf("InitURL = %q, want %q", got.InitURL, want)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, want, got.InitURL)
 }
 
-func TestMigrateRepo(t *testing.T) {
-	t.Parallel()
-
+func TestLoadManifestMigratesLegacyRepo(t *testing.T) {
 	tests := []struct {
 		name       string
 		entry      ManifestEntry
@@ -62,19 +59,17 @@ func TestMigrateRepo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
 			m := &Manifest{Plugins: []ManifestEntry{tt.entry}}
-			m.migrateRepo()
+			require.NoError(t, m.Save())
+			m, err := LoadManifest()
+			require.NoError(t, err)
+			require.Len(t, m.Plugins, 1)
 
 			got := m.Plugins[0]
-			if got.Type != tt.wantType {
-				t.Errorf("Type = %q, want %q", got.Type, tt.wantType)
-			}
-			if got.Source != tt.wantSource {
-				t.Errorf("Source = %q, want %q", got.Source, tt.wantSource)
-			}
-			if got.Repo != "" {
-				t.Errorf("Repo should be cleared after migration, got %q", got.Repo)
-			}
+			assert.Equal(t, tt.wantType, got.Type)
+			assert.Equal(t, tt.wantSource, got.Source)
+			assert.Empty(t, got.Repo)
 		})
 	}
 }

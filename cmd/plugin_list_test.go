@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPluginListColumnsKeepsFullNonDescriptionFields(t *testing.T) {
@@ -37,21 +38,11 @@ func TestPluginListColumnsKeepsFullNonDescriptionFields(t *testing.T) {
 		24,
 	)
 
-	if gotName != name {
-		t.Fatalf("name = %q, want %q", gotName, name)
-	}
-	if gotVersion != "0.5.0" {
-		t.Fatalf("version = %q, want %q", gotVersion, "0.5.0")
-	}
-	if gotSource != plugin.SourceTypeBrew {
-		t.Fatalf("source = %q, want %q", gotSource, plugin.SourceTypeBrew)
-	}
-	if gotPath != "~/.clime/plugins/clime-clickhouse-sql-parser" {
-		t.Fatalf("path = %q, want %q", gotPath, "~/.clime/plugins/clime-clickhouse-sql-parser")
-	}
-	if gotDesc == description {
-		t.Fatalf("description should be truncated when longer than width; got %q", gotDesc)
-	}
+	require.Equal(t, name, gotName)
+	require.Equal(t, "0.5.0", gotVersion)
+	require.Equal(t, plugin.SourceTypeBrew, gotSource)
+	require.Equal(t, "~/.clime/plugins/clime-clickhouse-sql-parser", gotPath)
+	require.NotEqual(t, description, gotDesc)
 }
 
 func TestPluginListColumnsFallbacks(t *testing.T) {
@@ -64,19 +55,9 @@ func TestPluginListColumnsFallbacks(t *testing.T) {
 		60,
 	)
 
-	if gotName != "foo" {
-		t.Fatalf("name = %q, want %q", gotName, "foo")
-	}
-	if gotDesc != "—" {
-		t.Fatalf("description = %q, want %q", gotDesc, "—")
-	}
-	if gotVersion != "—" {
-		t.Fatalf("version = %q, want %q", gotVersion, "—")
-	}
-	if gotSource != "—" {
-		t.Fatalf("source = %q, want %q", gotSource, "—")
-	}
-	if gotPath != "/tmp/clime-foo" {
-		t.Fatalf("path = %q, want %q", gotPath, "/tmp/clime-foo")
-	}
+	require.Equal(t, "foo", gotName)
+	require.Equal(t, "—", gotDesc)
+	require.Equal(t, "—", gotVersion)
+	require.Equal(t, "—", gotSource)
+	require.Equal(t, "/tmp/clime-foo", gotPath)
 }

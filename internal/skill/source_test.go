@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseSource(t *testing.T) {
@@ -25,14 +28,12 @@ func TestParseSource(t *testing.T) {
 
 	for _, tt := range tests {
 		src, err := ParseSource(tt.raw)
-		if err != nil {
-			t.Errorf("ParseSource(%q) error = %v", tt.raw, err)
+		if !assert.NoError(t, err, "ParseSource(%q)", tt.raw) {
 			continue
 		}
-		if src.Repo != tt.wantRepo || src.Query != tt.wantQuery {
-			t.Errorf("ParseSource(%q) = (%q, %q), want (%q, %q)",
-				tt.raw, src.Repo, src.Query, tt.wantRepo, tt.wantQuery)
-		}
+		assert.Equal(t, tt.wantRepo, src.Repo, "ParseSource(%q).Repo", tt.raw)
+		assert.Equal(t, tt.wantQuery, src.Query, "ParseSource(%q).Query", tt.raw)
+		assert.Equal(t, tt.raw, src.String(), "source must round-trip")
 	}
 }
 
@@ -40,62 +41,27 @@ func TestParseSourceRejectsInvalid(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{"", "noslash", "./does-not-exist", "../does-not-exist"} {
-		if src, err := ParseSource(raw); err == nil {
-			t.Errorf("ParseSource(%q) = %+v, want error", raw, src)
-		}
+		_, err := ParseSource(raw)
+		assert.Error(t, err)
 	}
 }
 
-func TestParseSourceAllowsCurrentDir(t *testing.T) {
-	src, err := ParseSource(".")
-	if err != nil {
-		t.Fatalf("ParseSource(.) error = %v", err)
-	}
-	if !src.IsLocal() {
-		t.Fatal("ParseSource(.) should be local")
-	}
-}
-
-func TestParseSourceLocalDir(t *testing.T) {
+func TestParseSourceLocalDirectories(t *testing.T) {
 	t.Parallel()
-
-	dir := t.TempDir()
-	src, err := ParseSource(dir)
-	if err != nil {
-		t.Fatalf("ParseSource(%q) error = %v", dir, err)
-	}
-	if src.Repo != dir || src.Query != "" {
-		t.Fatalf("ParseSource(%q) = (%q, %q), want the path with no query", dir, src.Repo, src.Query)
-	}
-	if !src.IsLocal() {
-		t.Fatal("existing directory should be local")
-	}
-
-	abs, err := src.Dir()
-	if err != nil {
-		t.Fatalf("Dir() error = %v", err)
-	}
-	want, _ := filepath.Abs(dir)
-	if abs != want {
-		t.Fatalf("Dir() = %q, want %q", abs, want)
-	}
-}
-
-func TestParseSourceKeepsLocalDirWithAt(t *testing.T) {
-	t.Parallel()
-
-	base := t.TempDir()
-	dir := filepath.Join(base, "skills@v2")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	src, err := ParseSource(dir)
-	if err != nil {
-		t.Fatalf("ParseSource(%q) error = %v", dir, err)
-	}
-	if src.Repo != dir || src.Query != "" {
-		t.Fatalf("ParseSource(%q) = (%q, %q), want the existing path unchanged", dir, src.Repo, src.Query)
+	dir := filepath.Join(t.TempDir(), "skills@v2")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+	for _, path := range []string{".", t.TempDir(), dir} {
+		t.Run(path, func(t *testing.T) {
+			src, err := ParseSource(path)
+			require.NoError(t, err)
+			require.Equal(t, Source{Repo: path}, src)
+			require.True(t, src.IsLocal())
+			abs, err := src.Dir()
+			require.NoError(t, err)
+			want, err := filepath.Abs(path)
+			require.NoError(t, err)
+			require.Equal(t, want, abs)
+		})
 	}
 }
 
@@ -117,32 +83,15 @@ func TestCloneURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := (Source{Repo: tt.repo}).CloneURL(); got != tt.want {
-			t.Errorf("CloneURL(%q) = %q, want %q", tt.repo, got, tt.want)
-		}
+		assert.Equal(t, tt.want, (Source{Repo: tt.repo}).CloneURL())
 	}
 }
 
 func TestSourceEqual(t *testing.T) {
 	t.Parallel()
 
-	if !(Source{Repo: "owner/repo", Query: "v1.0.0"}).Equal(Source{Repo: "Owner/Repo", Query: "latest"}) {
-		t.Fatal("Equal should ignore case and version queries")
-	}
-	if (Source{Repo: "owner/repo"}).Equal(Source{Repo: "owner/other"}) {
-		t.Fatal("Equal should not match different repos")
-	}
-}
-
-func TestSourceString(t *testing.T) {
-	t.Parallel()
-
-	if got := (Source{Repo: "owner/repo"}).String(); got != "owner/repo" {
-		t.Fatalf("String() = %q", got)
-	}
-	if got := (Source{Repo: "owner/repo"}).WithQuery("v1.2.3").String(); got != "owner/repo@v1.2.3" {
-		t.Fatalf("String() = %q", got)
-	}
+	require.True(t, (Source{Repo: "owner/repo", Query: "v1.0.0"}).Equal(Source{Repo: "Owner/Repo", Query: "latest"}), "Equal should ignore case and version queries")
+	require.False(t, (Source{Repo: "owner/repo"}).Equal(Source{Repo: "owner/other"}), "Equal should not match different repos")
 }
 
 func TestDisplayVersion(t *testing.T) {
@@ -155,8 +104,6 @@ func TestDisplayVersion(t *testing.T) {
 		{sha, sha[:12]},
 	}
 	for _, tt := range tests {
-		if got := DisplayVersion(tt.in); got != tt.want {
-			t.Errorf("DisplayVersion(%q) = %q, want %q", tt.in, got, tt.want)
-		}
+		assert.Equal(t, tt.want, DisplayVersion(tt.in))
 	}
 }

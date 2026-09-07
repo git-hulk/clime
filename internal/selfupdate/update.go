@@ -50,52 +50,52 @@ func New() *Updater {
 }
 
 // Update runs self-update using the default updater.
-func Update(opts Options) (*Result, error) {
-	return New().Update(opts)
+func Update(options Options) (*Result, error) {
+	return New().Update(options)
 }
 
 // Update updates the target executable to the latest release.
-func (u *Updater) Update(opts Options) (*Result, error) {
-	opts = opts.withDefaults()
-	if err := opts.validate(); err != nil {
+func (updater *Updater) Update(options Options) (*Result, error) {
+	options = options.withDefaults()
+	if err := options.validate(); err != nil {
 		return nil, err
 	}
 
-	release, err := u.fetchLatest(opts.Repo)
+	release, err := updater.fetchLatest(options.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("fetch latest release: %w", err)
 	}
 
 	latest := release.Version()
 	result := &Result{
-		CurrentVersion: opts.CurrentVersion,
+		CurrentVersion: options.CurrentVersion,
 		LatestVersion:  latest,
 	}
 
-	if !opts.Force && opts.CurrentVersion != "dev" && normalizeVersion(opts.CurrentVersion) == normalizeVersion(latest) {
+	if !options.Force && options.CurrentVersion != "dev" && normalizeVersion(options.CurrentVersion) == normalizeVersion(latest) {
 		return result, nil
 	}
 
-	asset, err := release.FindTarGzAsset(opts.BinaryName+"_", opts.TargetOS, opts.TargetArch)
+	asset, err := release.FindTarGzAsset(options.BinaryName+"_", options.TargetOS, options.TargetArch)
 	if err != nil {
 		return nil, err
 	}
 
-	execPath := opts.ExecutablePath
+	execPath := options.ExecutablePath
 	if execPath == "" {
 		var resolveErr error
-		execPath, resolveErr = u.resolveExecutablePath()
+		execPath, resolveErr = updater.resolveExecutablePath()
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve executable path: %w", resolveErr)
 		}
 	}
 
-	binaryContent, err := u.downloadBinary(asset.BrowserDownloadURL, opts.BinaryName)
+	binaryContent, err := updater.downloadBinary(asset.BrowserDownloadURL, options.BinaryName)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := u.replaceExecutable(execPath, opts.BinaryName, binaryContent); err != nil {
+	if err := updater.replaceExecutable(execPath, options.BinaryName, binaryContent); err != nil {
 		return nil, err
 	}
 
@@ -104,31 +104,31 @@ func (u *Updater) Update(opts Options) (*Result, error) {
 	return result, nil
 }
 
-func normalizeVersion(v string) string {
-	return strings.TrimPrefix(v, "v")
+func normalizeVersion(version string) string {
+	return strings.TrimPrefix(version, "v")
 }
 
-func (o Options) withDefaults() Options {
-	if o.BinaryName == "" {
-		o.BinaryName = DefaultBinaryName
+func (options Options) withDefaults() Options {
+	if options.BinaryName == "" {
+		options.BinaryName = DefaultBinaryName
 	}
-	if o.TargetOS == "" {
-		o.TargetOS = runtime.GOOS
+	if options.TargetOS == "" {
+		options.TargetOS = runtime.GOOS
 	}
-	if o.TargetArch == "" {
-		o.TargetArch = runtime.GOARCH
+	if options.TargetArch == "" {
+		options.TargetArch = runtime.GOARCH
 	}
-	return o
+	return options
 }
 
-func (o Options) validate() error {
-	if o.Repo == "" {
+func (options Options) validate() error {
+	if options.Repo == "" {
 		return fmt.Errorf("repo is required")
 	}
-	if o.BinaryName == "" {
+	if options.BinaryName == "" {
 		return fmt.Errorf("binary name is required")
 	}
-	if o.TargetOS == "" || o.TargetArch == "" {
+	if options.TargetOS == "" || options.TargetArch == "" {
 		return fmt.Errorf("target OS/arch are required")
 	}
 	return nil
@@ -147,26 +147,26 @@ func replaceExecutable(destPath, binaryName string, binaryContent []byte) error 
 		return fmt.Errorf("prepare destination directory: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(destPath), binaryName+".tmp-*")
+	temporaryFile, err := os.CreateTemp(filepath.Dir(destPath), binaryName+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	tmpPath := tmp.Name()
+	tmpPath := temporaryFile.Name()
 	cleanup := func() {
-		tmp.Close()
+		temporaryFile.Close()
 		_ = os.Remove(tmpPath)
 	}
 
-	if _, err := tmp.Write(binaryContent); err != nil {
+	if _, err := temporaryFile.Write(binaryContent); err != nil {
 		cleanup()
 		return fmt.Errorf("write binary: %w", err)
 	}
 
-	if err := tmp.Chmod(0755); err != nil {
+	if err := temporaryFile.Chmod(0755); err != nil {
 		cleanup()
 		return fmt.Errorf("set binary permissions: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
+	if err := temporaryFile.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp file: %w", err)
 	}

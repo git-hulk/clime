@@ -1,15 +1,14 @@
 package cmd
 
 import (
-	"errors"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/prompt"
 	"github.com/git-hulk/clime/internal/skill"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.T) {
@@ -36,7 +35,7 @@ func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.
 			// Select "Enter a new repository..." (after Plugin Skills option).
 			return 2, nil
 		default:
-			t.Fatalf("unexpected select call %d", selectCalls)
+			require.FailNow(t, "unexpected select call", "call %d", selectCalls)
 			return 0, nil
 		}
 	}
@@ -55,15 +54,9 @@ func TestRunInteractiveSkillsInstallEscFromActionReturnsToSourceMenu(t *testing.
 		return nil
 	}
 
-	if err := runInteractiveSkillsInstall(manifest); err != nil {
-		t.Fatalf("runInteractiveSkillsInstall() error = %v", err)
-	}
-	if gotRepo != "another/repo" {
-		t.Fatalf("repo = %q, want %q", gotRepo, "another/repo")
-	}
-	if gotAction != actionBrowseInstall {
-		t.Fatalf("action = %v, want %v", gotAction, actionBrowseInstall)
-	}
+	require.NoError(t, runInteractiveSkillsInstall(manifest))
+	require.Equal(t, "another/repo", gotRepo)
+	require.Equal(t, actionBrowseInstall, gotAction)
 }
 
 func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
@@ -87,7 +80,7 @@ func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
 			// Select "Enter a new repository..." (after Plugin Skills option).
 			return 2, nil
 		default:
-			t.Fatalf("unexpected select call %d", selectCalls)
+			require.FailNow(t, "unexpected select call", "call %d", selectCalls)
 			return 0, nil
 		}
 	}
@@ -99,71 +92,15 @@ func TestRunInteractiveSkillsInstallEscAtTopLevelKeepsUIOpen(t *testing.T) {
 	called := false
 	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
 		called = true
-		if repo != "new/repo" {
-			t.Fatalf("repo = %q, want %q", repo, "new/repo")
-		}
+		require.Equal(t, "new/repo", repo)
 		return nil
 	}
 
 	output := captureStdout(t, func() {
-		if err := runInteractiveSkillsInstall(manifest); err != nil {
-			t.Fatalf("runInteractiveSkillsInstall() error = %v", err)
-		}
+		require.NoError(t, runInteractiveSkillsInstall(manifest))
 	})
-	if output != "\n" {
-		t.Fatalf("stdout = %q, want %q", output, "\n")
-	}
-	if !called {
-		t.Fatal("expected skillsActionRunner to be called")
-	}
-}
-
-func TestRunInteractiveSkillsInstallEscFromInstallDoesNotPrintExtraSpacer(t *testing.T) {
-	manifest := &skill.Manifest{
-		Skills: []skill.InstalledSkill{
-			{Name: "alpha", Source: "owner/repo"},
-		},
-	}
-
-	restore := stubSkillPrompts(t)
-	defer restore()
-
-	selectCalls := 0
-	selectPrompt = func(config prompt.SelectConfig) (int, error) {
-		selectCalls++
-		switch selectCalls {
-		case 1:
-			return 0, nil
-		case 2:
-			return 1, nil
-		case 3:
-			return 1, nil
-		default:
-			t.Fatalf("unexpected select call %d", selectCalls)
-			return 0, nil
-		}
-	}
-
-	runs := 0
-	skillsActionRunner = func(manifest *skill.Manifest, repo string, action sourceAction) error {
-		runs++
-		if runs == 1 {
-			return prompt.ErrBack
-		}
-		return nil
-	}
-
-	output := captureStdout(t, func() {
-		if err := runInteractiveSkillsInstall(manifest); err != nil {
-			t.Fatalf("runInteractiveSkillsInstall() error = %v", err)
-		}
-	})
-	if output != "\n\n" {
-		t.Fatalf("stdout = %q, want %q", output, "\n\n")
-	}
-	if runs != 2 {
-		t.Fatalf("skillsActionRunner calls = %d, want 2", runs)
-	}
+	require.Equal(t, "\n", output)
+	require.True(t, called, "expected skillsActionRunner to be called")
 }
 
 func TestInteractiveUninstallEscKeepsMenuOpen(t *testing.T) {
@@ -186,19 +123,11 @@ func TestInteractiveUninstallEscKeepsMenuOpen(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		if err := interactiveUninstall(manifest); err != nil {
-			t.Fatalf("interactiveUninstall() error = %v", err)
-		}
+		require.NoError(t, interactiveUninstall(manifest))
 	})
-	if !strings.HasPrefix(output, "\n") {
-		t.Fatalf("stdout = %q, want prefix %q", output, "\n")
-	}
-	if strings.HasPrefix(output, "\n\n") {
-		t.Fatalf("stdout = %q, want a single leading spacer line", output)
-	}
-	if calls != 2 {
-		t.Fatalf("multiSelectPrompt calls = %d, want 2", calls)
-	}
+	require.True(t, strings.HasPrefix(output, "\n"))
+	require.False(t, strings.HasPrefix(output, "\n\n"))
+	require.Equal(t, 2, calls)
 }
 
 func TestInteractiveUninstallInterruptPropagates(t *testing.T) {
@@ -216,9 +145,7 @@ func TestInteractiveUninstallInterruptPropagates(t *testing.T) {
 	}
 
 	err := interactiveUninstall(manifest)
-	if !errors.Is(err, prompt.ErrInterrupted) {
-		t.Fatalf("interactiveUninstall() error = %v, want ErrInterrupted", err)
-	}
+	require.ErrorIs(t, err, prompt.ErrInterrupted)
 }
 
 func TestInteractiveUninstallUsesSortedSelection(t *testing.T) {
@@ -228,17 +155,12 @@ func TestInteractiveUninstallUsesSortedSelection(t *testing.T) {
 	}}
 	defer stubSkillPrompts(t)()
 	multiSelectPrompt = func(config prompt.SelectConfig) ([]int, error) {
-		if !slices.Equal(config.Options, []string{"alpha", "beta", "zebra"}) {
-			t.Fatalf("options = %v, want ascending names", config.Options)
-		}
+		require.Equal(t, []string{"alpha", "beta", "zebra"}, config.Options)
 		return []int{0, 1}, nil
 	}
-	if err := interactiveUninstall(manifest); err != nil {
-		t.Fatal(err)
-	}
-	if len(manifest.Skills) != 1 || manifest.Skills[0].Name != "zebra" {
-		t.Fatalf("remaining skills = %v, want only zebra", manifest.Skills)
-	}
+	require.NoError(t, interactiveUninstall(manifest))
+	require.Len(t, manifest.Skills, 1)
+	require.Equal(t, "zebra", manifest.Skills[0].Name)
 }
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -246,9 +168,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	origStdout := os.Stdout
 	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() error = %v", err)
-	}
+	require.NoError(t, err)
 	os.Stdout = w
 
 	done := make(chan string, 1)
@@ -263,13 +183,9 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	fn()
 
-	if err := w.Close(); err != nil {
-		t.Fatalf("stdout close error = %v", err)
-	}
+	require.NoError(t, w.Close())
 	output := <-done
-	if err := r.Close(); err != nil {
-		t.Fatalf("stdout reader close error = %v", err)
-	}
+	require.NoError(t, r.Close())
 	return output
 }
 func TestRunInteractiveSkillsInstallEscFromInstallReturnsToActionMenu(t *testing.T) {
@@ -293,7 +209,7 @@ func TestRunInteractiveSkillsInstallEscFromInstallReturnsToActionMenu(t *testing
 		case 3:
 			return 1, nil
 		default:
-			t.Fatalf("unexpected select call %d", selectCalls)
+			require.FailNow(t, "unexpected select call", "call %d", selectCalls)
 			return 0, nil
 		}
 	}
@@ -307,15 +223,11 @@ func TestRunInteractiveSkillsInstallEscFromInstallReturnsToActionMenu(t *testing
 		return nil
 	}
 
-	if err := runInteractiveSkillsInstall(manifest); err != nil {
-		t.Fatalf("runInteractiveSkillsInstall() error = %v", err)
-	}
-	if len(actions) != 2 {
-		t.Fatalf("actions length = %d, want 2", len(actions))
-	}
-	if actions[0] != actionBrowseInstall || actions[1] != actionUpdate {
-		t.Fatalf("actions = %v, want [%v %v]", actions, actionBrowseInstall, actionUpdate)
-	}
+	output := captureStdout(t, func() {
+		require.NoError(t, runInteractiveSkillsInstall(manifest))
+	})
+	require.Equal(t, []sourceAction{actionBrowseInstall, actionUpdate}, actions)
+	require.Equal(t, "\n\n", output, "returning to the action menu must not add a spacer")
 }
 
 func stubSkillPrompts(t *testing.T) func() {

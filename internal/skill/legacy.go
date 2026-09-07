@@ -15,33 +15,33 @@ import (
 
 // UnmarshalYAML accepts both the mapping form and the legacy plain-string
 // form ("owner/repo") of a sources entry.
-func (r *SourceRecord) UnmarshalYAML(value *yaml.Node) error {
+func (record *SourceRecord) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
-		return value.Decode(&r.Repo)
+		return value.Decode(&record.Repo)
 	}
-	type plain SourceRecord
-	var p plain
-	if err := value.Decode(&p); err != nil {
+	type sourceRecordYAML SourceRecord
+	var decodedRecord sourceRecordYAML
+	if err := value.Decode(&decodedRecord); err != nil {
 		return err
 	}
-	*r = SourceRecord(p)
+	*record = SourceRecord(decodedRecord)
 	return nil
 }
 
 // parseManifest unmarshals manifest data and migrates legacy layouts,
 // persisting the migrated form so the migration is a one-time cost.
 func parseManifest(path string, data []byte) (*Manifest, error) {
-	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
+	manifest := Manifest{path: path}
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
-	if m.normalize() {
+	if manifest.normalize() {
 		// The manifest is still usable when saving fails, so the error
 		// is not fatal here.
 		backupManifest(path, data)
-		_ = m.Save()
+		_ = manifest.Save()
 	}
-	return &m, nil
+	return &manifest, nil
 }
 
 // backupManifest keeps the pre-migration manifest beside the current one so a
@@ -61,7 +61,7 @@ func backupManifest(path string, data []byte) {
 // becomes the source's version), legacy per-skill versions move to their
 // source, duplicate sources fold into the first-seen spelling, and every
 // installed skill's source is listed. Returns whether anything changed.
-func (m *Manifest) normalize() bool {
+func (manifest *Manifest) normalize() bool {
 	changed := false
 
 	// Version candidates for sources that have none, keyed by lowercased repo.
@@ -73,49 +73,49 @@ func (m *Manifest) normalize() bool {
 		}
 	}
 
-	for i, s := range m.Skills {
-		repo, query := splitSource(s.Source)
-		if repo != s.Source {
-			m.Skills[i].Source = repo
+	for i, installedSkill := range manifest.Skills {
+		repo, query := splitSource(installedSkill.Source)
+		if repo != installedSkill.Source {
+			manifest.Skills[i].Source = repo
 			changed = true
 		}
 		noteCandidate(repo, query)
-		if s.LegacyVersion != "" {
-			noteCandidate(repo, s.LegacyVersion)
-			m.Skills[i].LegacyVersion = ""
+		if installedSkill.LegacyVersion != "" {
+			noteCandidate(repo, installedSkill.LegacyVersion)
+			manifest.Skills[i].LegacyVersion = ""
 			changed = true
 		}
 	}
 
-	sources := m.Sources
-	m.Sources = nil
-	for _, r := range sources {
-		repo, query := splitSource(r.Repo)
+	sources := manifest.Sources
+	manifest.Sources = nil
+	for _, record := range sources {
+		repo, query := splitSource(record.Repo)
 		noteCandidate(repo, query)
-		if i := m.sourceIndex(repo); i >= 0 {
-			if m.Sources[i].Version == "" {
-				m.Sources[i].Version = r.Version
+		if i := manifest.sourceIndex(repo); i >= 0 {
+			if manifest.Sources[i].Version == "" {
+				manifest.Sources[i].Version = record.Version
 			}
 			changed = true
 			continue
 		}
-		if repo != r.Repo {
+		if repo != record.Repo {
 			changed = true
 		}
-		m.Sources = append(m.Sources, SourceRecord{Repo: repo, Version: r.Version})
+		manifest.Sources = append(manifest.Sources, SourceRecord{Repo: repo, Version: record.Version})
 	}
 
-	for _, s := range m.Skills {
-		if s.Source != "" && m.sourceIndex(s.Source) < 0 {
-			m.Sources = append(m.Sources, SourceRecord{Repo: s.Source})
+	for _, installedSkill := range manifest.Skills {
+		if installedSkill.Source != "" && manifest.sourceIndex(installedSkill.Source) < 0 {
+			manifest.Sources = append(manifest.Sources, SourceRecord{Repo: installedSkill.Source})
 			changed = true
 		}
 	}
 
-	for i, r := range m.Sources {
-		if r.Version == "" {
-			if v := candidates[strings.ToLower(r.Repo)]; v != "" {
-				m.Sources[i].Version = v
+	for i, record := range manifest.Sources {
+		if record.Version == "" {
+			if candidateVersion := candidates[strings.ToLower(record.Repo)]; candidateVersion != "" {
+				manifest.Sources[i].Version = candidateVersion
 				changed = true
 			}
 		}

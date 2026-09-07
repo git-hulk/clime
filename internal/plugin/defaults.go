@@ -50,17 +50,17 @@ func LoadPluginsFromFile(path string) (*PluginList, error) {
 //     system-wide state and need explicit user action to switch source.
 //   - skipped:     already installed and matching, or non-script type.
 func CategorizeForInit(plugins []Plugin, manifest *Manifest) (toInstall, toReinstall []Plugin, skipped []string) {
-	for _, p := range plugins {
-		entry, exists := manifest.Get(p.Name)
+	for _, pluginConfig := range plugins {
+		entry, exists := manifest.Get(pluginConfig.Name)
 		if !exists {
-			toInstall = append(toInstall, p)
+			toInstall = append(toInstall, pluginConfig)
 			continue
 		}
-		if p.Script != "" && entry.Type == SourceTypeScript && entry.Source != p.Script {
-			toReinstall = append(toReinstall, p)
+		if pluginConfig.Script != "" && entry.Type == SourceTypeScript && entry.Source != pluginConfig.Script {
+			toReinstall = append(toReinstall, pluginConfig)
 			continue
 		}
-		skipped = append(skipped, p.Name)
+		skipped = append(skipped, pluginConfig.Name)
 	}
 	return
 }
@@ -71,22 +71,22 @@ func CategorizeForInit(plugins []Plugin, manifest *Manifest) (toInstall, toReins
 // If no tags are specified, tagged plugins are skipped.
 func FilterByTags(plugins []Plugin, tags []string) []Plugin {
 	tagSet := make(map[string]bool, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t != "" {
-			tagSet[t] = true
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" {
+			tagSet[tag] = true
 		}
 	}
 
 	filtered := make([]Plugin, 0, len(plugins))
-	for _, p := range plugins {
-		if len(p.Tags) == 0 {
-			filtered = append(filtered, p)
+	for _, pluginConfig := range plugins {
+		if len(pluginConfig.Tags) == 0 {
+			filtered = append(filtered, pluginConfig)
 			continue
 		}
-		for _, pt := range p.Tags {
-			if tagSet[strings.TrimSpace(pt)] {
-				filtered = append(filtered, p)
+		for _, pluginTag := range pluginConfig.Tags {
+			if tagSet[strings.TrimSpace(pluginTag)] {
+				filtered = append(filtered, pluginConfig)
 				break
 			}
 		}
@@ -96,17 +96,17 @@ func FilterByTags(plugins []Plugin, tags []string) []Plugin {
 
 // FetchPlugins downloads and parses a default plugins YAML file from a URL.
 func FetchPlugins(url string) (*PluginList, error) {
-	resp, err := http.Get(url)
+	response, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch default plugins: %w", err)
 	}
-	defer resp.Body.Close()
+	defer response.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch default plugins: HTTP %d", resp.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch default plugins: HTTP %d", response.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}

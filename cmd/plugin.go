@@ -69,23 +69,23 @@ var pluginListCmd = &cobra.Command{
 
 		home, _ := os.UserHomeDir()
 
-		const descWidth = 60
+		const descriptionWidth = 60
 		headers := []string{"NAME", "DESCRIPTION", "VERSION", "SOURCE", "PATH"}
 		var rows [][]string
-		for _, p := range discovered {
-			name, desc, version, source, path := pluginListColumns(p, manifest, home, descWidth)
-			rows = append(rows, []string{name, desc, version, source, path})
+		for _, discoveredPlugin := range discovered {
+			name, description, version, source, path := pluginListColumns(discoveredPlugin, manifest, home, descriptionWidth)
+			rows = append(rows, []string{name, description, version, source, path})
 		}
 
 		// Compute max width per column from headers and data.
-		colWidths := make([]int, len(headers))
-		for i, h := range headers {
-			colWidths[i] = len(h)
+		columnWidths := make([]int, len(headers))
+		for i, header := range headers {
+			columnWidths[i] = len(header)
 		}
 		for _, row := range rows {
 			for i, cell := range row {
-				if len(cell) > colWidths[i] {
-					colWidths[i] = len(cell)
+				if len(cell) > columnWidths[i] {
+					columnWidths[i] = len(cell)
 				}
 			}
 		}
@@ -94,20 +94,20 @@ var pluginListCmd = &cobra.Command{
 		const indent = "  "
 		// Print bold headers.
 		fmt.Print(indent)
-		for i, h := range headers {
+		for i, header := range headers {
 			if i > 0 {
 				fmt.Print(strings.Repeat(" ", gap))
 			}
-			fmt.Print(uicli.BoldColor.Sprintf("%-*s", colWidths[i], h))
+			fmt.Print(uicli.BoldColor.Sprintf("%-*s", columnWidths[i], header))
 		}
 		fmt.Println()
 		// Print separator.
 		fmt.Print(indent)
-		for i, w := range colWidths {
+		for i, width := range columnWidths {
 			if i > 0 {
 				fmt.Print(strings.Repeat(" ", gap))
 			}
-			fmt.Print(strings.Repeat("-", w))
+			fmt.Print(strings.Repeat("-", width))
 		}
 		fmt.Println()
 		// Print data rows.
@@ -117,7 +117,7 @@ var pluginListCmd = &cobra.Command{
 				if i > 0 {
 					fmt.Print(strings.Repeat(" ", gap))
 				}
-				fmt.Printf("%-*s", colWidths[i], cell)
+				fmt.Printf("%-*s", columnWidths[i], cell)
 			}
 			fmt.Println()
 		}
@@ -125,11 +125,11 @@ var pluginListCmd = &cobra.Command{
 	},
 }
 
-func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, home string, descWidth int) (name, desc, version, source, path string) {
-	name = p.Name
+func pluginListColumns(discoveredPlugin plugin.DiscoveredPlugin, manifest *plugin.Manifest, home string, descriptionWidth int) (name, description, version, source, path string) {
+	name = discoveredPlugin.Name
 	version = "—"
 	source = "—"
-	if entry, ok := manifest.Get(p.Name); ok {
+	if entry, ok := manifest.Get(discoveredPlugin.Name); ok {
 		if entry.Version != "" {
 			version = entry.Version
 		}
@@ -138,17 +138,17 @@ func pluginListColumns(p plugin.DiscoveredPlugin, manifest *plugin.Manifest, hom
 		}
 	}
 
-	desc = p.Description
-	if desc == "" {
-		desc = "—"
+	description = discoveredPlugin.Description
+	if description == "" {
+		description = "—"
 	}
-	desc = uicli.TruncateString(desc, descWidth)
+	description = uicli.TruncateString(description, descriptionWidth)
 
-	path = p.Path
+	path = discoveredPlugin.Path
 	if home != "" {
 		path = strings.Replace(path, home, "~", 1)
 	}
-	return name, desc, version, source, path
+	return name, description, version, source, path
 }
 
 var pluginInstallCmd = &cobra.Command{
@@ -245,8 +245,8 @@ func runInteractivePluginInstall() error {
 	}
 
 	// Step 3: Collect source details based on install type.
-	var p plugin.Plugin
-	p.Name = name
+	var pluginConfig plugin.Plugin
+	pluginConfig.Name = name
 
 	fmt.Println()
 	switch typeIdx {
@@ -259,24 +259,24 @@ func runInteractivePluginInstall() error {
 		if url == "" {
 			return fmt.Errorf("script URL cannot be empty")
 		}
-		p.Script = url
+		pluginConfig.Script = url
 
 		binPath, err := inputPrompt("Enter binary path after install (leave empty to auto-detect)")
 		if err != nil {
 			return err
 		}
-		p.BinaryPath = strings.TrimSpace(binPath)
+		pluginConfig.BinaryPath = strings.TrimSpace(binPath)
 
 	case 1: // npm
-		pkg, err := inputPrompt("Enter npm package name")
+		packageName, err := inputPrompt("Enter npm package name")
 		if err != nil {
 			return err
 		}
-		pkg = strings.TrimSpace(pkg)
-		if pkg == "" {
+		packageName = strings.TrimSpace(packageName)
+		if packageName == "" {
 			return fmt.Errorf("npm package name cannot be empty")
 		}
-		p.Npm = pkg
+		pluginConfig.Npm = packageName
 
 	case 2: // Homebrew
 		formula, err := inputPrompt("Enter Homebrew formula")
@@ -287,7 +287,7 @@ func runInteractivePluginInstall() error {
 		if formula == "" {
 			return fmt.Errorf("Homebrew formula cannot be empty")
 		}
-		p.Brew = formula
+		pluginConfig.Brew = formula
 
 	case 3: // GitHub Release
 		repo, err := inputPrompt("Enter GitHub repository (owner/repo)")
@@ -298,21 +298,21 @@ func runInteractivePluginInstall() error {
 		if repo == "" {
 			return fmt.Errorf("GitHub repository cannot be empty")
 		}
-		p.Repo = repo
+		pluginConfig.Repo = repo
 	}
 
 	// Step 4: Optional description.
-	desc, err := inputPrompt("Enter description (leave empty to skip)")
+	description, err := inputPrompt("Enter description (leave empty to skip)")
 	if err != nil {
 		return err
 	}
-	p.Description = strings.TrimSpace(desc)
+	pluginConfig.Description = strings.TrimSpace(description)
 
-	return pluginInstallRunner(manifest, name, p)
+	return pluginInstallRunner(manifest, name, pluginConfig)
 }
 
-func executePluginInstall(manifest *plugin.Manifest, name string, p plugin.Plugin) error {
-	inst, err := installer.FromPlugin(p)
+func executePluginInstall(manifest *plugin.Manifest, name string, pluginConfig plugin.Plugin) error {
+	pluginInstaller, err := installer.FromPlugin(pluginConfig)
 	if err != nil {
 		return err
 	}
@@ -323,15 +323,15 @@ func executePluginInstall(manifest *plugin.Manifest, name string, p plugin.Plugi
 		WithMessage(fmt.Sprintf("Installing plugin %q...", name)).
 		Start()
 
-	version, err := inst.Install(name)
+	version, err := pluginInstaller.Install(name)
 	if err != nil {
 		spinner.Error(fmt.Sprintf("Failed to install plugin %q", name))
 		return fmt.Errorf("failed to install plugin %q: %w", name, err)
 	}
 
-	manifest.Add(name, version, inst.PluginType(), inst.Source(), p.BinaryPath)
-	if p.Description != "" {
-		manifest.SetDescription(name, p.Description)
+	manifest.Add(name, version, pluginInstaller.PluginType(), pluginInstaller.Source(), pluginConfig.BinaryPath)
+	if pluginConfig.Description != "" {
+		manifest.SetDescription(name, pluginConfig.Description)
 	}
 	if err := manifest.Save(); err != nil {
 		return fmt.Errorf("plugin installed but failed to update manifest: %w", err)
@@ -350,14 +350,14 @@ var pluginUninstallCmd = &cobra.Command{
 	Args:    cobra.MinimumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		already := make(map[string]struct{}, len(args))
-		for _, a := range args {
-			already[a] = struct{}{}
+		for _, argument := range args {
+			already[argument] = struct{}{}
 		}
 		var filtered []string
-		for _, c := range completeInstalledPlugins(toComplete) {
-			name := strings.SplitN(c, "\t", 2)[0]
+		for _, candidate := range completeInstalledPlugins(toComplete) {
+			name := strings.SplitN(candidate, "\t", 2)[0]
 			if _, ok := already[name]; !ok {
-				filtered = append(filtered, c)
+				filtered = append(filtered, candidate)
 			}
 		}
 		return filtered, cobra.ShellCompDirectiveNoFileComp
@@ -392,12 +392,12 @@ var pluginUninstallCmd = &cobra.Command{
 				WithMessage(fmt.Sprintf("Removing plugin %q...", name)).
 				Start()
 
-			inst, err := installer.FromManifest(entry)
+			pluginInstaller, err := installer.FromManifest(entry)
 			if err != nil {
 				// If we can't determine the installer type, just remove the binary directly.
-				inst = installer.NewGitHubInstaller("")
+				pluginInstaller = installer.NewGitHubInstaller("")
 			}
-			if err := inst.Uninstall(name, entry); err != nil {
+			if err := pluginInstaller.Uninstall(name, entry); err != nil {
 				spinner.Error(fmt.Sprintf("Failed to remove plugin %q", name))
 				failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
 				continue
@@ -463,11 +463,11 @@ var pluginUpdateCmd = &cobra.Command{
 
 		entry, _ := manifest.Get(name)
 
-		var inst installer.Installer
+		var pluginInstaller installer.Installer
 		if repo := strings.TrimSpace(pluginUpdateRepo); repo != "" {
-			inst = installer.NewGitHubInstaller(repo)
+			pluginInstaller = installer.NewGitHubInstaller(repo)
 		} else {
-			inst, err = installer.FromManifest(entry)
+			pluginInstaller, err = installer.FromManifest(entry)
 			if err != nil {
 				if entry.Type == "" {
 					spinner.Stop()
@@ -478,18 +478,18 @@ var pluginUpdateCmd = &cobra.Command{
 			}
 		}
 
-		result, err := inst.Update(name, entry)
+		result, err := pluginInstaller.Update(name, entry)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed to update plugin %q", name))
 			return fmt.Errorf("failed to update plugin %q: %w", name, err)
 		}
 
 		if !result.Updated {
-			spinner.Success(fmt.Sprintf("%s is up to date", name))
+			spinner.Success(fmt.Sprintf("Plugin %s is up to date", name))
 			return nil
 		}
 
-		manifest.Add(name, result.LatestVersion, inst.PluginType(), inst.Source(), entry.BinaryPath)
+		manifest.Add(name, result.LatestVersion, pluginInstaller.PluginType(), pluginInstaller.Source(), entry.BinaryPath)
 		if err := manifest.Save(); err != nil {
 			return fmt.Errorf("plugin updated but failed to update manifest: %w", err)
 		}
@@ -516,8 +516,8 @@ func runPluginUpdateAll() error {
 
 	seen := map[string]bool{}
 	var names []string
-	for _, p := range manifest.Plugins {
-		name := strings.TrimSpace(p.Name)
+	for _, entry := range manifest.Plugins {
+		name := strings.TrimSpace(entry.Name)
 		if name == "" || seen[name] {
 			continue
 		}
@@ -549,14 +549,14 @@ func runPluginUpdateAll() error {
 			Start()
 
 		entry, _ := manifest.Get(name)
-		inst, err := installer.FromManifest(entry)
+		pluginInstaller, err := installer.FromManifest(entry)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed: %s", name))
 			failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
 			continue
 		}
 
-		result, err := inst.Update(name, entry)
+		result, err := pluginInstaller.Update(name, entry)
 		if err != nil {
 			spinner.Error(fmt.Sprintf("Failed: %s", name))
 			failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
@@ -564,12 +564,12 @@ func runPluginUpdateAll() error {
 		}
 
 		if !result.Updated {
-			spinner.Success(fmt.Sprintf("%s is up to date", name))
+			spinner.Success(fmt.Sprintf("Plugin %s is up to date", name))
 			skipped++
 			continue
 		}
 
-		manifest.Add(name, result.LatestVersion, inst.PluginType(), inst.Source(), entry.BinaryPath)
+		manifest.Add(name, result.LatestVersion, pluginInstaller.PluginType(), pluginInstaller.Source(), entry.BinaryPath)
 		if err := manifest.Save(); err != nil {
 			spinner.Error(fmt.Sprintf("Failed: %s (manifest save)", name))
 			failed = append(failed, fmt.Sprintf("%s (manifest save: %v)", name, err))
@@ -597,13 +597,13 @@ func runPluginUpdateAll() error {
 func completeInstalledPlugins(toComplete string) []string {
 	discovered := plugin.Discover()
 	var completions []string
-	for _, p := range discovered {
-		if strings.HasPrefix(p.Name, toComplete) {
-			desc := p.Description
-			if desc == "" {
-				desc = p.Name + " plugin"
+	for _, discoveredPlugin := range discovered {
+		if strings.HasPrefix(discoveredPlugin.Name, toComplete) {
+			description := discoveredPlugin.Description
+			if description == "" {
+				description = discoveredPlugin.Name + " plugin"
 			}
-			completions = append(completions, p.Name+"\t"+desc)
+			completions = append(completions, discoveredPlugin.Name+"\t"+description)
 		}
 	}
 	return completions

@@ -36,22 +36,22 @@ var installSkillCmd = &cobra.Command{
 			return err
 		}
 
-		for _, t := range targets {
-			if t.Name != "agents" && !t.Exists() {
-				terminal.Warningf("Skipping %s (directory not found)", t.Dir)
+		for _, target := range targets {
+			if target.Name != "agents" && !target.Exists() {
+				terminal.Warningf("Skipping %s (directory not found)", target.Dir)
 				continue
 			}
 
 			files := map[string][]byte{skillFileName: []byte(SkillContent)}
 			// Include the bundled agent metadata in the shared skill.
-			if t.Name == "agents" {
+			if target.Name == "agents" {
 				files[filepath.Join("agents", "openai.yaml")] = []byte(AgentYAML)
 			}
-			if err := t.Install(skillDirName, files); err != nil {
-				return fmt.Errorf("failed to install skill to %s: %w", t.Dir, err)
+			if err := target.Install(skillDirName, files); err != nil {
+				return fmt.Errorf("failed to install skill to %s: %w", target.Dir, err)
 			}
 
-			terminal.Successf("Installed skill to %s", filepath.Join(t.Dir, "skills", skillDirName, skillFileName))
+			terminal.Successf("Installed skill to %s", filepath.Join(target.Dir, "skills", skillDirName, skillFileName))
 		}
 		return nil
 	},

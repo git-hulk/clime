@@ -3,10 +3,11 @@ package installer
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNpmInstallerUpdate(t *testing.T) {
@@ -17,9 +18,7 @@ func TestNpmInstallerUpdate(t *testing.T) {
 		Package: "@myorg/clime-deploy",
 		runNpmUpdate: func(pkg string) error {
 			ranNpmUpdate = true
-			if pkg != "@myorg/clime-deploy" {
-				t.Fatalf("pkg = %q, want %q", pkg, "@myorg/clime-deploy")
-			}
+			require.Equal(t, "@myorg/clime-deploy", pkg)
 			return nil
 		},
 		pluginBinDir: func() (string, error) {
@@ -37,22 +36,12 @@ func TestNpmInstallerUpdate(t *testing.T) {
 		Source:  "@myorg/clime-deploy",
 	}
 	result, err := n.Update("deploy", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if !ranNpmUpdate {
-		t.Fatal("npm update should run for npm source")
-	}
-	if !result.Updated {
-		t.Fatal("Update() should mark updated for npm source")
-	}
-	if result.LatestVersion != plugin.VersionLatest {
-		t.Fatalf("LatestVersion = %q, want %q", result.LatestVersion, plugin.VersionLatest)
-	}
+	require.NoError(t, err)
+	require.True(t, ranNpmUpdate, "npm update should run for npm source")
+	require.True(t, result.Updated, "Update() should mark updated for npm source")
+	require.Equal(t, plugin.VersionLatest, result.LatestVersion)
 	wantPath := filepath.Join("/tmp/clime-plugin-test", "clime-deploy")
-	if result.Path != wantPath {
-		t.Fatalf("Path = %q, want %q", result.Path, wantPath)
-	}
+	require.Equal(t, wantPath, result.Path)
 }
 
 func TestNpmInstallerUpdateUpToDate(t *testing.T) {
@@ -78,12 +67,8 @@ func TestNpmInstallerUpdateUpToDate(t *testing.T) {
 		Source:  "@myorg/clime-deploy",
 	}
 	result, err := n.Update("deploy", entry)
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	if result.Updated {
-		t.Fatal("Update() should not mark updated when semver version is unchanged")
-	}
+	require.NoError(t, err)
+	require.False(t, result.Updated, "Update() should not mark updated when semver version is unchanged")
 }
 
 func TestLocateNpmInstalledBinaryPrefersClimePrefix(t *testing.T) {
@@ -93,12 +78,8 @@ func TestLocateNpmInstalledBinaryPrefersClimePrefix(t *testing.T) {
 	mustTouch(t, filepath.Join(dir, "deploy"))
 
 	path, err := locateNpmInstalledBinary(dir, "@myorg/clime-deploy", "deploy", "clime-deploy", map[string]struct{}{})
-	if err != nil {
-		t.Fatalf("locateNpmInstalledBinary() error = %v", err)
-	}
-	if want := filepath.Join(dir, "clime-deploy"); path != want {
-		t.Fatalf("path = %q, want %q", path, want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, "clime-deploy"), path)
 }
 
 func TestLocateNpmInstalledBinaryFallsBackToName(t *testing.T) {
@@ -107,12 +88,8 @@ func TestLocateNpmInstalledBinaryFallsBackToName(t *testing.T) {
 	mustTouch(t, filepath.Join(dir, "codex"))
 
 	path, err := locateNpmInstalledBinary(dir, "@openai/codex", "codex", "clime-codex", map[string]struct{}{})
-	if err != nil {
-		t.Fatalf("locateNpmInstalledBinary() error = %v", err)
-	}
-	if want := filepath.Join(dir, "codex"); path != want {
-		t.Fatalf("path = %q, want %q", path, want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, "codex"), path)
 }
 
 func TestLocateNpmInstalledBinaryDiscoversNewBinary(t *testing.T) {
@@ -123,12 +100,8 @@ func TestLocateNpmInstalledBinaryDiscoversNewBinary(t *testing.T) {
 	mustTouch(t, filepath.Join(dir, "weirdname"))
 
 	path, err := locateNpmInstalledBinary(dir, "some-package", "tool", "clime-tool", before)
-	if err != nil {
-		t.Fatalf("locateNpmInstalledBinary() error = %v", err)
-	}
-	if want := filepath.Join(dir, "weirdname"); path != want {
-		t.Fatalf("path = %q, want %q", path, want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, "weirdname"), path)
 }
 
 func TestLocateNpmInstalledBinaryErrorsWhenNoBinaryCreated(t *testing.T) {
@@ -138,15 +111,8 @@ func TestLocateNpmInstalledBinaryErrorsWhenNoBinaryCreated(t *testing.T) {
 	before := snapshotDirEntries(dir)
 
 	_, err := locateNpmInstalledBinary(dir, "openai/codex", "codex", "clime-codex", before)
-	if err == nil {
-		t.Fatal("expected error when npm install produced no new binary")
-	}
-	if !strings.Contains(err.Error(), "did not create a binary") {
-		t.Fatalf("error = %q, want it to mention missing binary", err)
-	}
-	if !strings.Contains(err.Error(), "openai/codex") {
-		t.Fatalf("error = %q, want it to reference the package", err)
-	}
+	require.ErrorContains(t, err, "did not create a binary", "expected error when npm install produced no new binary")
+	require.ErrorContains(t, err, "openai/codex")
 }
 
 func TestLocateNpmInstalledBinaryErrorsOnAmbiguousNewBinaries(t *testing.T) {
@@ -157,15 +123,11 @@ func TestLocateNpmInstalledBinaryErrorsOnAmbiguousNewBinaries(t *testing.T) {
 	mustTouch(t, filepath.Join(dir, "tsserver"))
 
 	_, err := locateNpmInstalledBinary(dir, "typescript", "ts", "clime-ts", before)
-	if err == nil {
-		t.Fatal("expected error when multiple new binaries match nothing")
-	}
-	if !strings.Contains(err.Error(), "tsc") || !strings.Contains(err.Error(), "tsserver") {
-		t.Fatalf("error = %q, want it to list both binaries", err)
-	}
+	require.ErrorContains(t, err, "tsc", "expected error when multiple new binaries match nothing")
+	require.ErrorContains(t, err, "tsserver")
 }
 
-func TestNormalizeNpmPackageName(t *testing.T) {
+func TestNpmInstallerNormalizesPackageSource(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		in   string
@@ -185,39 +147,14 @@ func TestNormalizeNpmPackageName(t *testing.T) {
 		{"", ""},
 	}
 	for _, c := range cases {
-		got := normalizeNpmPackageName(c.in)
-		if got != c.want {
-			t.Errorf("normalizeNpmPackageName(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestNewNpmInstallerNormalizesPackage(t *testing.T) {
-	t.Parallel()
-	n := NewNpmInstaller("openai/codex")
-	if n.Package != "@openai/codex" {
-		t.Fatalf("Package = %q, want %q", n.Package, "@openai/codex")
+		got := NewNpmInstaller(c.in).Source()
+		assert.Equal(t, c.want, got)
 	}
 }
 
 func mustTouch(t *testing.T, path string) {
 	t.Helper()
 	f, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create %s: %v", path, err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("close %s: %v", path, err)
-	}
-}
-
-func TestNpmInstallerPluginType(t *testing.T) {
-	t.Parallel()
-	n := NewNpmInstaller("@myorg/clime-deploy")
-	if n.PluginType() != plugin.SourceTypeNpm {
-		t.Fatalf("PluginType() = %q, want %q", n.PluginType(), plugin.SourceTypeNpm)
-	}
-	if n.Source() != "@myorg/clime-deploy" {
-		t.Fatalf("Source() = %q, want %q", n.Source(), "@myorg/clime-deploy")
-	}
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
 }

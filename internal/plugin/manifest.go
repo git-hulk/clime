@@ -61,47 +61,47 @@ func LoadManifest() (*Manifest, error) {
 		}
 		return nil, err
 	}
-	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
+	var manifest Manifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
 		return nil, err
 	}
-	if m.migrateRepo() {
-		_ = m.Save()
+	if manifest.migrateRepo() {
+		_ = manifest.Save()
 	}
-	return &m, nil
+	return &manifest, nil
 }
 
 // migrateRepo converts legacy "repo" field entries to Type+Source.
 // Returns true if any entries were migrated.
-func (m *Manifest) migrateRepo() bool {
+func (manifest *Manifest) migrateRepo() bool {
 	migrated := false
-	for i, p := range m.Plugins {
-		if p.Type != "" || p.Repo == "" {
+	for i, entry := range manifest.Plugins {
+		if entry.Type != "" || entry.Repo == "" {
 			continue
 		}
-		repo := p.Repo
+		repo := entry.Repo
 		switch {
 		case strings.HasPrefix(repo, "npm:"):
-			m.Plugins[i].Type = SourceTypeNpm
-			m.Plugins[i].Source = strings.TrimPrefix(repo, "npm:")
+			manifest.Plugins[i].Type = SourceTypeNpm
+			manifest.Plugins[i].Source = strings.TrimPrefix(repo, "npm:")
 		case strings.HasPrefix(repo, "brew:"):
-			m.Plugins[i].Type = SourceTypeBrew
-			m.Plugins[i].Source = strings.TrimPrefix(repo, "brew:")
+			manifest.Plugins[i].Type = SourceTypeBrew
+			manifest.Plugins[i].Source = strings.TrimPrefix(repo, "brew:")
 		case strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "http://"):
-			m.Plugins[i].Type = SourceTypeScript
-			m.Plugins[i].Source = repo
+			manifest.Plugins[i].Type = SourceTypeScript
+			manifest.Plugins[i].Source = repo
 		default:
-			m.Plugins[i].Type = SourceTypeGitHub
-			m.Plugins[i].Source = repo
+			manifest.Plugins[i].Type = SourceTypeGitHub
+			manifest.Plugins[i].Source = repo
 		}
-		m.Plugins[i].Repo = ""
+		manifest.Plugins[i].Repo = ""
 		migrated = true
 	}
 	return migrated
 }
 
 // Save writes the manifest back to disk.
-func (m *Manifest) Save() error {
+func (manifest *Manifest) Save() error {
 	path, err := manifestPath()
 	if err != nil {
 		return err
@@ -109,7 +109,7 @@ func (m *Manifest) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(m)
+	data, err := yaml.Marshal(manifest)
 	if err != nil {
 		return err
 	}
@@ -117,18 +117,18 @@ func (m *Manifest) Save() error {
 }
 
 // Add adds or updates a plugin entry in the manifest.
-func (m *Manifest) Add(name, version, sourceType, source, binaryPath string) {
-	for i, p := range m.Plugins {
-		if p.Name == name {
-			m.Plugins[i].Version = version
-			m.Plugins[i].Type = sourceType
-			m.Plugins[i].Source = source
-			m.Plugins[i].BinaryPath = binaryPath
-			m.Plugins[i].InstalledAt = time.Now()
+func (manifest *Manifest) Add(name, version, sourceType, source, binaryPath string) {
+	for i, entry := range manifest.Plugins {
+		if entry.Name == name {
+			manifest.Plugins[i].Version = version
+			manifest.Plugins[i].Type = sourceType
+			manifest.Plugins[i].Source = source
+			manifest.Plugins[i].BinaryPath = binaryPath
+			manifest.Plugins[i].InstalledAt = time.Now()
 			return
 		}
 	}
-	m.Plugins = append(m.Plugins, ManifestEntry{
+	manifest.Plugins = append(manifest.Plugins, ManifestEntry{
 		Name:        name,
 		Version:     version,
 		Type:        sourceType,
@@ -139,20 +139,20 @@ func (m *Manifest) Add(name, version, sourceType, source, binaryPath string) {
 }
 
 // SetDescription sets the description for a plugin entry in the manifest.
-func (m *Manifest) SetDescription(name, description string) {
-	for i, p := range m.Plugins {
-		if p.Name == name {
-			m.Plugins[i].Description = description
+func (manifest *Manifest) SetDescription(name, description string) {
+	for i, entry := range manifest.Plugins {
+		if entry.Name == name {
+			manifest.Plugins[i].Description = description
 			return
 		}
 	}
 }
 
 // Remove removes a plugin entry from the manifest.
-func (m *Manifest) Remove(name string) bool {
-	for i, p := range m.Plugins {
-		if p.Name == name {
-			m.Plugins = append(m.Plugins[:i], m.Plugins[i+1:]...)
+func (manifest *Manifest) Remove(name string) bool {
+	for i, entry := range manifest.Plugins {
+		if entry.Name == name {
+			manifest.Plugins = append(manifest.Plugins[:i], manifest.Plugins[i+1:]...)
 			return true
 		}
 	}
@@ -160,10 +160,10 @@ func (m *Manifest) Remove(name string) bool {
 }
 
 // Get returns a manifest entry by name.
-func (m *Manifest) Get(name string) (ManifestEntry, bool) {
-	for _, p := range m.Plugins {
-		if p.Name == name {
-			return p, true
+func (manifest *Manifest) Get(name string) (ManifestEntry, bool) {
+	for _, entry := range manifest.Plugins {
+		if entry.Name == name {
+			return entry, true
 		}
 	}
 	return ManifestEntry{}, false

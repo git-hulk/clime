@@ -96,33 +96,33 @@ func installCompletion(shell string) error {
 		terminal.Info("Open a new shell or source your profile to enable completion.")
 		return nil
 	}
-	terminal.Successf("%s completion is already configured.", shell)
+	terminal.Successf("Completion for %s is already configured.", shell)
 	return nil
 }
 
 func generateCompletionScript(shell string) (string, error) {
-	var buf bytes.Buffer
+	var completionScript bytes.Buffer
 	switch shell {
 	case "bash":
-		if err := rootCmd.GenBashCompletionV2(&buf, true); err != nil {
+		if err := rootCmd.GenBashCompletionV2(&completionScript, true); err != nil {
 			return "", err
 		}
 	case "zsh":
-		if err := rootCmd.GenZshCompletion(&buf); err != nil {
+		if err := rootCmd.GenZshCompletion(&completionScript); err != nil {
 			return "", err
 		}
 	case "fish":
-		if err := rootCmd.GenFishCompletion(&buf, true); err != nil {
+		if err := rootCmd.GenFishCompletion(&completionScript, true); err != nil {
 			return "", err
 		}
 	case "powershell":
-		if err := rootCmd.GenPowerShellCompletionWithDesc(&buf); err != nil {
+		if err := rootCmd.GenPowerShellCompletionWithDesc(&completionScript); err != nil {
 			return "", err
 		}
 	default:
 		return "", fmt.Errorf("unsupported shell %q", shell)
 	}
-	return buf.String(), nil
+	return completionScript.String(), nil
 }
 
 func detectShellFromEnv(shellValue string, isWindows bool) (string, error) {
@@ -143,8 +143,8 @@ func detectShellFromEnv(shellValue string, isWindows bool) (string, error) {
 }
 
 func normalizeShell(shellValue string) string {
-	s := strings.ToLower(strings.TrimSpace(filepath.Base(shellValue)))
-	switch s {
+	normalizedShell := strings.ToLower(strings.TrimSpace(filepath.Base(shellValue)))
+	switch normalizedShell {
 	case "bash":
 		return "bash"
 	case "zsh":
@@ -186,18 +186,18 @@ func ensureLineInFile(path, marker, line string) (bool, error) {
 		return false, fmt.Errorf("prepare profile directory: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	profile, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return false, fmt.Errorf("open profile %s: %w", path, err)
 	}
-	defer f.Close()
+	defer profile.Close()
 
 	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
-		if _, err := f.WriteString("\n"); err != nil {
+		if _, err := profile.WriteString("\n"); err != nil {
 			return false, fmt.Errorf("write profile newline: %w", err)
 		}
 	}
-	if _, err := f.WriteString("\n" + marker + "\n" + line + "\n"); err != nil {
+	if _, err := profile.WriteString("\n" + marker + "\n" + line + "\n"); err != nil {
 		return false, fmt.Errorf("write profile hook: %w", err)
 	}
 	return true, nil

@@ -3,8 +3,9 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeShell(t *testing.T) {
@@ -23,9 +24,7 @@ func TestNormalizeShell(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := normalizeShell(tt.in); got != tt.want {
-			t.Fatalf("normalizeShell(%q) = %q, want %q", tt.in, got, tt.want)
-		}
+		require.Equal(t, tt.want, normalizeShell(tt.in))
 	}
 }
 
@@ -33,24 +32,15 @@ func TestDetectShellFromEnv(t *testing.T) {
 	t.Parallel()
 
 	got, err := detectShellFromEnv("/bin/zsh", false)
-	if err != nil {
-		t.Fatalf("detectShellFromEnv() error = %v", err)
-	}
-	if got != "zsh" {
-		t.Fatalf("shell = %q, want %q", got, "zsh")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "zsh", got)
 
 	got, err = detectShellFromEnv("", true)
-	if err != nil {
-		t.Fatalf("windows detect should succeed: %v", err)
-	}
-	if got != "powershell" {
-		t.Fatalf("shell = %q, want %q", got, "powershell")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "powershell", got)
 
-	if _, err := detectShellFromEnv("unknown", false); err == nil {
-		t.Fatal("expected error for unknown shell")
-	}
+	_, err = detectShellFromEnv("unknown", false)
+	require.Error(t, err, "expected error for unknown shell")
 }
 
 func TestEnsureLineInFileIdempotent(t *testing.T) {
@@ -62,27 +52,16 @@ func TestEnsureLineInFileIdempotent(t *testing.T) {
 	line := "[ -f '/tmp/clime' ] && source '/tmp/clime'"
 
 	changed, err := ensureLineInFile(path, marker, line)
-	if err != nil {
-		t.Fatalf("first ensureLineInFile() error = %v", err)
-	}
-	if !changed {
-		t.Fatal("first ensureLineInFile() should report changed")
-	}
+	require.NoError(t, err)
+	require.True(t, changed, "first ensureLineInFile() should report changed")
 
 	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read profile: %v", err)
-	}
+	require.NoError(t, err)
 	content := string(data)
-	if !strings.Contains(content, marker) || !strings.Contains(content, line) {
-		t.Fatalf("profile content missing marker/line: %q", content)
-	}
+	require.Contains(t, content, marker)
+	require.Contains(t, content, line)
 
 	changed, err = ensureLineInFile(path, marker, line)
-	if err != nil {
-		t.Fatalf("second ensureLineInFile() error = %v", err)
-	}
-	if changed {
-		t.Fatal("second ensureLineInFile() should be idempotent")
-	}
+	require.NoError(t, err)
+	require.False(t, changed, "second ensureLineInFile() should be idempotent")
 }

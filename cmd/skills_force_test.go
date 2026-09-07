@@ -1,90 +1,36 @@
 package cmd
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/skill"
+	"github.com/stretchr/testify/require"
 )
 
-func TestSelectInstallCandidatesSkipsInstalledByDefault(t *testing.T) {
-	manifest := &skill.Manifest{
-		Skills: []skill.InstalledSkill{
-			{Name: "alpha", Source: "owner/repo"},
-		},
-	}
-	repoSkills := []skill.Entry{
-		{Name: "alpha", Description: "first"},
-		{Name: "beta", Description: "second"},
-	}
-
-	got := selectInstallCandidates(repoSkills, manifest, false)
-	if len(got) != 1 {
-		t.Fatalf("candidates = %d, want 1 (installed alpha filtered out)", len(got))
-	}
-	if got[0].entry.Name != "beta" {
-		t.Fatalf("candidate = %q, want beta", got[0].entry.Name)
-	}
-	if strings.Contains(got[0].label, "(reinstall)") {
-		t.Fatalf("beta is not installed, label must not be marked reinstall: %q", got[0].label)
-	}
-}
-
-func TestSelectInstallCandidatesForceIncludesInstalled(t *testing.T) {
-	manifest := &skill.Manifest{
-		Skills: []skill.InstalledSkill{
-			{Name: "alpha", Source: "owner/repo"},
-		},
-	}
-	repoSkills := []skill.Entry{
-		{Name: "alpha", Description: "first"},
-		{Name: "beta", Description: "second"},
-	}
-
-	got := selectInstallCandidates(repoSkills, manifest, true)
-	if len(got) != 2 {
-		t.Fatalf("candidates = %d, want 2 (force keeps installed alpha)", len(got))
-	}
-
-	byName := map[string]installCandidate{}
-	for _, c := range got {
-		byName[c.entry.Name] = c
-	}
-	if !strings.Contains(byName["alpha"].label, "(reinstall)") {
-		t.Fatalf("installed alpha should be marked reinstall under force, got %q", byName["alpha"].label)
-	}
-	if strings.Contains(byName["beta"].label, "(reinstall)") {
-		t.Fatalf("not-installed beta must not be marked reinstall, got %q", byName["beta"].label)
-	}
-}
-
-func TestSelectInstallCandidatesForceEmptyRepo(t *testing.T) {
-	manifest := &skill.Manifest{}
-	if got := selectInstallCandidates(nil, manifest, true); len(got) != 0 {
-		t.Fatalf("candidates = %d, want 0 for empty repo", len(got))
-	}
-}
-
-func TestSelectInstallCandidatesSortedByName(t *testing.T) {
+func TestSelectInstallCandidates(t *testing.T) {
+	t.Parallel()
 	manifest := &skill.Manifest{Skills: []skill.InstalledSkill{{Name: "beta"}}}
 	entries := []skill.Entry{
 		{Name: "zebra", Path: "first"},
 		{Name: "beta", Path: "second"},
 		{Name: "alpha", Path: "third"},
 	}
-	for _, force := range []bool{false, true} {
-		want := []skill.Entry{entries[2], entries[0]}
-		if force {
-			want = []skill.Entry{entries[2], entries[1], entries[0]}
-		}
-		got := selectInstallCandidates(entries, manifest, force)
-		if len(got) != len(want) {
-			t.Fatalf("force=%v: got %d candidates, want %d", force, len(got), len(want))
-		}
-		for i, entry := range want {
-			if got[i].entry.Name != entry.Name || got[i].entry.Path != entry.Path || !strings.HasPrefix(got[i].label, entry.Name) {
-				t.Fatalf("force=%v: candidate %d = %+v, want %+v", force, i, got[i], entry)
-			}
-		}
+	for _, tt := range []struct {
+		name    string
+		entries []skill.Entry
+		force   bool
+		want    []installCandidate
+	}{
+		{"skip installed and sort", entries, false, []installCandidate{
+			{entry: entries[2], label: "alpha"}, {entry: entries[0], label: "zebra"},
+		}},
+		{"force includes and labels reinstall", entries, true, []installCandidate{
+			{entry: entries[2], label: "alpha"}, {entry: entries[1], label: "beta (reinstall)"}, {entry: entries[0], label: "zebra"},
+		}},
+		{"empty source", nil, true, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, selectInstallCandidates(tt.entries, manifest, tt.force))
+		})
 	}
 }

@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/git-hulk/clime/internal/plugin"
 	"github.com/git-hulk/clime/internal/prompt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func stubPluginPrompts(t *testing.T) func() {
@@ -91,9 +91,7 @@ func TestRunInteractivePluginInstall(t *testing.T) {
 
 			inputIdx := 0
 			inputPrompt = func(label string) (string, error) {
-				if inputIdx >= len(tt.inputs) {
-					t.Fatalf("unexpected input prompt %d: %s", inputIdx, label)
-				}
+				require.Less(t, inputIdx, len(tt.inputs))
 				val := tt.inputs[inputIdx]
 				inputIdx++
 				return val, nil
@@ -111,31 +109,15 @@ func TestRunInteractivePluginInstall(t *testing.T) {
 				return nil
 			}
 
-			if err := runInteractivePluginInstall(); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, runInteractivePluginInstall())
 
-			if gotName != tt.wantName {
-				t.Errorf("name = %q, want %q", gotName, tt.wantName)
-			}
-			if gotPlugin.Script != tt.wantPlugin.Script {
-				t.Errorf("Script = %q, want %q", gotPlugin.Script, tt.wantPlugin.Script)
-			}
-			if gotPlugin.BinaryPath != tt.wantPlugin.BinaryPath {
-				t.Errorf("BinaryPath = %q, want %q", gotPlugin.BinaryPath, tt.wantPlugin.BinaryPath)
-			}
-			if gotPlugin.Npm != tt.wantPlugin.Npm {
-				t.Errorf("Npm = %q, want %q", gotPlugin.Npm, tt.wantPlugin.Npm)
-			}
-			if gotPlugin.Brew != tt.wantPlugin.Brew {
-				t.Errorf("Brew = %q, want %q", gotPlugin.Brew, tt.wantPlugin.Brew)
-			}
-			if gotPlugin.Repo != tt.wantPlugin.Repo {
-				t.Errorf("Repo = %q, want %q", gotPlugin.Repo, tt.wantPlugin.Repo)
-			}
-			if gotPlugin.Description != tt.wantPlugin.Description {
-				t.Errorf("Description = %q, want %q", gotPlugin.Description, tt.wantPlugin.Description)
-			}
+			assert.Equal(t, tt.wantName, gotName)
+			assert.Equal(t, tt.wantPlugin.Script, gotPlugin.Script)
+			assert.Equal(t, tt.wantPlugin.BinaryPath, gotPlugin.BinaryPath)
+			assert.Equal(t, tt.wantPlugin.Npm, gotPlugin.Npm)
+			assert.Equal(t, tt.wantPlugin.Brew, gotPlugin.Brew)
+			assert.Equal(t, tt.wantPlugin.Repo, gotPlugin.Repo)
+			assert.Equal(t, tt.wantPlugin.Description, gotPlugin.Description)
 		})
 	}
 }
@@ -157,12 +139,8 @@ func TestRunInteractivePluginInstallEscAtTypeReturnsNil(t *testing.T) {
 		return nil
 	}
 
-	if err := runInteractivePluginInstall(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if called {
-		t.Fatal("expected pluginInstallRunner not to be called")
-	}
+	require.NoError(t, runInteractivePluginInstall())
+	require.False(t, called, "expected pluginInstallRunner not to be called")
 }
 
 func TestRunInteractivePluginInstallEmptyName(t *testing.T) {
@@ -174,12 +152,7 @@ func TestRunInteractivePluginInstallEmptyName(t *testing.T) {
 	}
 
 	err := runInteractivePluginInstall()
-	if err == nil {
-		t.Fatal("expected error for empty name")
-	}
-	if !strings.Contains(err.Error(), "cannot be empty") {
-		t.Fatalf("error = %q, want empty name message", err.Error())
-	}
+	require.ErrorContains(t, err, "cannot be empty", "expected error for empty name")
 }
 
 func TestRunInteractivePluginInstallInterruptPropagates(t *testing.T) {
@@ -194,9 +167,7 @@ func TestRunInteractivePluginInstallInterruptPropagates(t *testing.T) {
 	}
 
 	err := runInteractivePluginInstall()
-	if !errors.Is(err, prompt.ErrInterrupted) {
-		t.Fatalf("error = %v, want ErrInterrupted", err)
-	}
+	require.ErrorIs(t, err, prompt.ErrInterrupted)
 }
 
 func TestRunInteractivePluginInstallEmptySource(t *testing.T) {
@@ -239,9 +210,7 @@ func TestRunInteractivePluginInstallEmptySource(t *testing.T) {
 
 			inputIdx := 0
 			inputPrompt = func(label string) (string, error) {
-				if inputIdx >= len(tt.inputs) {
-					t.Fatalf("unexpected input prompt %d: %s", inputIdx, label)
-				}
+				require.Less(t, inputIdx, len(tt.inputs))
 				val := tt.inputs[inputIdx]
 				inputIdx++
 				return val, nil
@@ -252,12 +221,7 @@ func TestRunInteractivePluginInstallEmptySource(t *testing.T) {
 			}
 
 			err := runInteractivePluginInstall()
-			if err == nil {
-				t.Fatal("expected error for empty source")
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("error = %q, want %q", err.Error(), tt.wantErr)
-			}
+			require.ErrorContains(t, err, tt.wantErr, "expected error for empty source")
 		})
 	}
 }
