@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -59,8 +60,8 @@ func (c *Catalog) Find(name string) (Entry, bool) {
 }
 
 // ReadCatalog reads the skill catalog of a checkout directory, trying
-// skills.yaml, skills.yml, .claude-plugin/marketplace.json and
-// .claude-plugin/plugin.json in that order.
+// skills.yaml, skills.yml, .claude-plugin/marketplace.json,
+// .claude-plugin/plugin.json, and the skills directory in that order.
 func ReadCatalog(dir string) (*Catalog, error) {
 	var data []byte
 	var err error
@@ -86,7 +87,17 @@ func ReadCatalog(dir string) (*Catalog, error) {
 		return catalog, nil
 	}
 
-	return nil, fmt.Errorf("no skills catalog found: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json")
+	if catalog, err := readSkillsDir(dir, "skills"); err == nil {
+		catalog.Skills = slices.DeleteFunc(catalog.Skills, func(entry Entry) bool {
+			info, err := os.Stat(filepath.Join(dir, entry.Path, "SKILL.md"))
+			return err != nil || !info.Mode().IsRegular()
+		})
+		if len(catalog.Skills) > 0 {
+			return catalog, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no skills catalog found: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, .claude-plugin/plugin.json, and skills/*/SKILL.md")
 }
 
 // parseMarketplaceManifest reads .claude-plugin/marketplace.json and builds
@@ -138,7 +149,11 @@ func parsePluginManifest(dir string) (*Catalog, error) {
 		return nil, fmt.Errorf("plugin.json has no skills directory")
 	}
 
-	skillsDir := strings.TrimPrefix(pf.Skills, "./")
+	return readSkillsDir(dir, strings.TrimPrefix(pf.Skills, "./"))
+}
+
+// readSkillsDir builds a catalog from the immediate subdirectories of skillsDir.
+func readSkillsDir(dir, skillsDir string) (*Catalog, error) {
 	entries, err := os.ReadDir(filepath.Join(dir, skillsDir))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read skills directory: %w", err)

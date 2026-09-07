@@ -2,6 +2,7 @@ package skill
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -177,5 +178,69 @@ func TestReadCatalogNoManifest(t *testing.T) {
 
 	if _, err := ReadCatalog(t.TempDir()); err == nil {
 		t.Fatal("ReadCatalog() should fail when no catalog file exists")
+	}
+}
+
+func TestReadCatalogFromSkillsDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"),
+		"---\nname: custom-alpha\ndescription: Alpha description\n---\n# Alpha")
+	writeFile(t, filepath.Join(dir, "skills", "beta", "SKILL.md"), "# Beta")
+	writeFile(t, filepath.Join(dir, "skills", "gamma", "SKILL.md"),
+		"---\ndescription: Gamma description\n---\n# Gamma")
+	writeFile(t, filepath.Join(dir, "skills", "assets", "example.txt"), "not a skill")
+	writeFile(t, filepath.Join(dir, "skills", "README.md"), "not a skill")
+	writeFile(t, filepath.Join(dir, "skills", "nested", "child", "SKILL.md"), "# Nested")
+	writeFile(t, filepath.Join(dir, "skills", "invalid", "SKILL.md", "file.txt"), "not a regular SKILL.md")
+
+	catalog, err := ReadCatalog(dir)
+	if err != nil {
+		t.Fatalf("ReadCatalog() error = %v", err)
+	}
+	want := []Entry{
+		{Name: "custom-alpha", Description: "Alpha description", Path: "skills/alpha"},
+		{Name: "beta", Path: "skills/beta"},
+		{Name: "gamma", Description: "Gamma description", Path: "skills/gamma"},
+	}
+	if !reflect.DeepEqual(catalog.Skills, want) {
+		t.Fatalf("catalog = %+v, want %+v", catalog.Skills, want)
+	}
+}
+
+func TestReadCatalogPrefersManifestOverSkillsDirectory(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ path, content string }{
+		{"skills.yaml", "skills:\n  - name: chosen\n    path: skills/chosen\n"},
+		{"skills.yml", "skills:\n  - name: chosen\n    path: skills/chosen\n"},
+		{".claude-plugin/marketplace.json", `{"plugins": [{"skills": ["skills/chosen"]}]}`},
+		{".claude-plugin/plugin.json", `{"skills": "custom"}`},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, tt.path), tt.content)
+			writeFile(t, filepath.Join(dir, "skills", "chosen", "SKILL.md"), "# Chosen")
+			writeFile(t, filepath.Join(dir, "custom", "chosen", "SKILL.md"), "# Chosen")
+			writeFile(t, filepath.Join(dir, "skills", "unlisted", "SKILL.md"), "# Unlisted")
+			catalog, err := ReadCatalog(dir)
+			if err != nil {
+				t.Fatalf("ReadCatalog() error = %v", err)
+			}
+			if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "chosen" {
+				t.Fatalf("catalog = %+v, want only the manifest's chosen skill", catalog.Skills)
+			}
+		})
+	}
+}
+
+func TestReadCatalogSkillsDirectoryRequiresSkillMd(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "assets", "example.txt"), "not a skill")
+	if _, err := ReadCatalog(dir); err == nil {
+		t.Fatal("ReadCatalog() should fail when the skills directory contains no skills")
 	}
 }

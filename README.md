@@ -93,6 +93,11 @@ Skills use the same layout: files in `~/.agents/skills/<name>/`, a symlink in
 existing skill replaces its old Claude directory with the symlink. Uninstall
 removes the shared files and Claude link.
 
+Repositories can provide `skills.yaml`, `skills.yml`,
+`.claude-plugin/marketplace.json`, or `.claude-plugin/plugin.json`. As a final
+fallback, clime discovers `skills/<name>/SKILL.md` directly. It reads names and
+descriptions from frontmatter, using the directory name when no name is provided.
+
 Install, update, sync, list, and uninstall skills from GitHub repositories or local paths:
 
 ```sh
