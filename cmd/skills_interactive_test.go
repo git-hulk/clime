@@ -312,9 +312,3 @@ func stubSkillPrompts(t *testing.T) func() {
 		skillsActionRunner = origRunner
 	}
 }
-
-func TestValidateSkillRepoSourceAllowsLocalCurrentDir(t *testing.T) {
-	if err := validateSkillRepoSource("."); err != nil {
-		t.Fatalf("validateSkillRepoSource(.) error = %v", err)
-	}
-}

@@ -13,7 +13,7 @@ func TestSelectInstallCandidatesSkipsInstalledByDefault(t *testing.T) {
 			{Name: "alpha", Source: "owner/repo"},
 		},
 	}
-	repoSkills := []skill.SkillEntry{
+	repoSkills := []skill.Entry{
 		{Name: "alpha", Description: "first"},
 		{Name: "beta", Description: "second"},
 	}
@@ -36,7 +36,7 @@ func TestSelectInstallCandidatesForceIncludesInstalled(t *testing.T) {
 			{Name: "alpha", Source: "owner/repo"},
 		},
 	}
-	repoSkills := []skill.SkillEntry{
+	repoSkills := []skill.Entry{
 		{Name: "alpha", Description: "first"},
 		{Name: "beta", Description: "second"},
 	}
