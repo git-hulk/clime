@@ -56,7 +56,7 @@ func TestReadCatalogFromPluginJSON(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"), `{"name": "test-plugin", "skills": "./.claude/skills"}`)
+	writeFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"), `{"name": "test-plugin", "skills": ["./.claude/skills/skill-x", "./.claude/skills/skill-y"]}`)
 	for _, name := range []string{"skill-x", "skill-y"} {
 		content := "---\nname: " + name + "\ndescription: " + name + " desc\n---\n# " + name
 		writeFile(t, filepath.Join(dir, ".claude", "skills", name, "SKILL.md"), content)
@@ -73,6 +73,24 @@ func TestReadCatalogFromPluginJSON(t *testing.T) {
 	require.True(t, names["skill-y"])
 }
 
+func TestReadCatalogFromMarketplacePluginManifest(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"),
+		`{"plugins": [{"name": "test-plugin", "source": "./"}]}`)
+	writeFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"),
+		`{"name": "test-plugin", "skills": ["./skills/engineering/ask-matt"]}`)
+	writeFile(t, filepath.Join(dir, "skills", "engineering", "ask-matt", "SKILL.md"),
+		"---\nname: ask-matt\ndescription: Ask Matt\n---\n# Ask Matt")
+
+	catalog, err := ReadCatalog(dir)
+	require.NoError(t, err)
+	require.Equal(t, []Entry{{
+		Name: "ask-matt", Description: "Ask Matt", Path: filepath.Join("skills", "engineering", "ask-matt"),
+	}}, catalog.Skills)
+}
+
 func TestReadCatalogPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
 	t.Parallel()
 
@@ -81,7 +99,7 @@ func TestReadCatalogPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
 	writeFile(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"),
 		`{"plugins": [{"name": "test", "description": "test plugin", "source": "./"}]}`)
 	writeFile(t, filepath.Join(dir, ".claude-plugin", "plugin.json"),
-		`{"name": "test", "skills": "./.claude/skills"}`)
+		`{"name": "test", "skills": ["./.claude/skills/my-skill"]}`)
 	writeFile(t, filepath.Join(dir, ".claude", "skills", "my-skill", "SKILL.md"),
 		"---\nname: my-skill\ndescription: A skill\n---\n# My Skill")
 
@@ -129,7 +147,7 @@ func TestReadCatalogPrefersManifestOverSkillsDirectory(t *testing.T) {
 		{"skills.yaml", "skills:\n  - name: chosen\n    path: skills/chosen\n"},
 		{"skills.yml", "skills:\n  - name: chosen\n    path: skills/chosen\n"},
 		{".claude-plugin/marketplace.json", `{"plugins": [{"skills": ["skills/chosen"]}]}`},
-		{".claude-plugin/plugin.json", `{"skills": "custom"}`},
+		{".claude-plugin/plugin.json", `{"skills": ["custom/chosen"]}`},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			dir := t.TempDir()

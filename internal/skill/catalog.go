@@ -39,8 +39,8 @@ type marketplacePlugin struct {
 
 // pluginFile represents the .claude-plugin/plugin.json format.
 type pluginFile struct {
-	Name   string `json:"name"`
-	Skills string `json:"skills"`
+	Name   string          `json:"name"`
+	Skills json.RawMessage `json:"skills"`
 }
 
 // skillFrontmatter holds the YAML frontmatter from a SKILL.md file.
@@ -121,6 +121,20 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 	seen := make(map[string]bool)
 	for _, plugin := range marketplace.Plugins {
 		sourceDir := strings.TrimPrefix(plugin.Source, "./")
+		if len(plugin.Skills) == 0 {
+			pluginCatalog, err := parsePluginManifest(filepath.Join(dir, sourceDir))
+			if err == nil {
+				for _, entry := range pluginCatalog.Skills {
+					entry.Path = filepath.Join(sourceDir, entry.Path)
+					if !seen[entry.Path] {
+						seen[entry.Path] = true
+						catalog.Skills = append(catalog.Skills, entry)
+					}
+				}
+			}
+			continue
+		}
+
 		for _, skillPath := range plugin.Skills {
 			skillPath = strings.TrimPrefix(skillPath, "./")
 			if sourceDir != "" {
@@ -149,11 +163,22 @@ func parsePluginManifest(dir string) (*Catalog, error) {
 	if err := json.Unmarshal(data, &pluginManifest); err != nil {
 		return nil, fmt.Errorf("failed to parse plugin.json: %w", err)
 	}
-	if pluginManifest.Skills == "" {
+	var skillPaths []string
+	if err := json.Unmarshal(pluginManifest.Skills, &skillPaths); err == nil {
+		var catalog Catalog
+		for _, skillPath := range skillPaths {
+			skillPath = strings.TrimPrefix(skillPath, "./")
+			catalog.Skills = append(catalog.Skills, entryFromSkillDir(dir, skillPath))
+		}
+		return &catalog, nil
+	}
+
+	var skillsDir string
+	if err := json.Unmarshal(pluginManifest.Skills, &skillsDir); err != nil || skillsDir == "" {
 		return nil, fmt.Errorf("plugin.json has no skills directory")
 	}
 
-	return readSkillsDir(dir, strings.TrimPrefix(pluginManifest.Skills, "./"))
+	return readSkillsDir(dir, strings.TrimPrefix(skillsDir, "./"))
 }
 
 // readSkillsDir builds a catalog from the immediate subdirectories of skillsDir.
