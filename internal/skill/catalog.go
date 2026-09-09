@@ -61,7 +61,8 @@ func (catalog *Catalog) Find(name string) (Entry, bool) {
 
 // ReadCatalog reads the skill catalog of a checkout directory, trying
 // skills.yaml, skills.yml, .claude-plugin/marketplace.json,
-// .claude-plugin/plugin.json, and the skills directory in that order.
+// .claude-plugin/plugin.json, skills, .agents/skills, and .claude/skills
+// in that order.
 func ReadCatalog(dir string) (*Catalog, error) {
 	var data []byte
 	var err error
@@ -87,17 +88,20 @@ func ReadCatalog(dir string) (*Catalog, error) {
 		return catalog, nil
 	}
 
-	if catalog, err := readSkillsDir(dir, "skills"); err == nil {
-		catalog.Skills = slices.DeleteFunc(catalog.Skills, func(entry Entry) bool {
-			info, err := os.Stat(filepath.Join(dir, entry.Path, "SKILL.md"))
-			return err != nil || !info.Mode().IsRegular()
-		})
-		if len(catalog.Skills) > 0 {
-			return catalog, nil
+	allowedDirectories := []string{"skills", filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills")}
+	for _, skillsDir := range allowedDirectories {
+		if catalog, err := readSkillsDir(dir, skillsDir); err == nil {
+			catalog.Skills = slices.DeleteFunc(catalog.Skills, func(entry Entry) bool {
+				info, err := os.Stat(filepath.Join(dir, entry.Path, "SKILL.md"))
+				return err != nil || !info.Mode().IsRegular()
+			})
+			if len(catalog.Skills) > 0 {
+				return catalog, nil
+			}
 		}
 	}
 
-	return nil, fmt.Errorf("no skills catalog found: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, .claude-plugin/plugin.json, and skills/*/SKILL.md")
+	return nil, fmt.Errorf("no skills catalog found: tried skills.yaml, skills.yml, .claude-plugin/marketplace.json, .claude-plugin/plugin.json, and skills, .agents/skills, .claude/skills directories")
 }
 
 // parseMarketplaceManifest reads .claude-plugin/marketplace.json and builds

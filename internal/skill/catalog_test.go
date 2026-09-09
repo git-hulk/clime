@@ -154,3 +154,33 @@ func TestReadCatalogSkillsDirectoryRequiresSkillMd(t *testing.T) {
 	_, err := ReadCatalog(dir)
 	require.Error(t, err, "ReadCatalog() should fail when the skills directory contains no skills")
 }
+
+func TestReadCatalogFromAgentSkillsDirectories(t *testing.T) {
+	t.Parallel()
+
+	for _, skillsDir := range []string{".agents/skills", ".claude/skills"} {
+		t.Run(skillsDir, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, skillsDir, "agent-skill", "SKILL.md"),
+				"---\nname: agent-skill\ndescription: Agent skill\n---\n# Skill")
+
+			catalog, err := ReadCatalog(dir)
+			require.NoError(t, err)
+			require.Equal(t, []Entry{{
+				Name: "agent-skill", Description: "Agent skill", Path: filepath.Join(skillsDir, "agent-skill"),
+			}}, catalog.Skills)
+		})
+	}
+}
+
+func TestReadCatalogPrefersSkillsDirectoryOverAgentSkills(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "shared", "SKILL.md"), "# Shared")
+	writeFile(t, filepath.Join(dir, ".agents", "skills", "agent-only", "SKILL.md"), "# Agent only")
+
+	catalog, err := ReadCatalog(dir)
+	require.NoError(t, err)
+	require.Equal(t, []Entry{{Name: "shared", Path: filepath.Join("skills", "shared")}}, catalog.Skills)
+}

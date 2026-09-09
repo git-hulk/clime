@@ -201,7 +201,7 @@ func (manager *Manager) Update(source Source) (int, error) {
 }
 
 // Sync re-installs a source's skills at the saved version, following branch
-// names to their current head and using skills/<name> paths. It returns how
+// names to their current head and using catalog entry paths. It returns how
 // many skills it re-installed. A source without a saved version uses latest.
 // Branch names and latest are preserved and resolved remotely on each sync. After successful installation,
 // other cached versions of the source are removed.
@@ -223,12 +223,23 @@ func (manager *Manager) Sync(source Source) (int, error) {
 		events.SourceFailed(VerbSync, locked, err)
 		return 0, err
 	}
-	events.SourceReady(VerbSync, source, snapshot.Version)
 
+	catalog, err := snapshot.Catalog()
+	if err != nil {
+		events.SourceFailed(VerbSync, locked, err)
+		return 0, err
+	}
 	entries := make([]Entry, 0, len(installed))
 	for _, installedSkill := range installed {
-		entries = append(entries, Entry{Name: installedSkill.Name})
+		entry, ok := catalog.Find(installedSkill.Name)
+		if !ok {
+			err := fmt.Errorf("%s no longer provides skill %q", source.Repo, installedSkill.Name)
+			events.SourceFailed(VerbSync, locked, err)
+			return 0, err
+		}
+		entries = append(entries, entry)
 	}
+	events.SourceReady(VerbSync, source, snapshot.Version)
 	return manager.install(VerbSync, snapshot, entries)
 }
 
@@ -292,7 +303,12 @@ func (manager *Manager) installEntry(verb Verb, snapshot *Snapshot, entry Entry)
 	if err := validateSkillName(entry.Name); err != nil {
 		return err
 	}
-	files, err := snapshot.SkillFiles(filepath.Join("skills", entry.Name))
+	path := entry.Path
+	files, err := snapshot.SkillFiles(path)
+	if err != nil && path != filepath.Join("skills", entry.Name) {
+		path = filepath.Join("skills", entry.Name)
+		files, err = snapshot.SkillFiles(path)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to %s skill %q: %w", verb, entry.Name, err)
 	}

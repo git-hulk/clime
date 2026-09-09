@@ -577,3 +577,38 @@ func TestLatestChecksRemoteForInstallUpdateAndSync(t *testing.T) {
 		})
 	}
 }
+
+func TestManagerSkillOperationsUseCatalogEntryPath(t *testing.T) {
+	for _, skillsDir := range []string{".agents/skills", ".claude/skills"} {
+		t.Run(skillsDir, func(t *testing.T) {
+			repoDir := t.TempDir()
+			skillPath := filepath.Join(repoDir, skillsDir, "folder", "SKILL.md")
+			writeFile(t, skillPath, "---\nname: alpha\n---\n# Install")
+			manager, home := newTestManager(t, &Manifest{})
+			source := Source{Repo: repoDir}
+			snapshot, catalog, err := manager.Fetch(source)
+			require.NoError(t, err)
+
+			count, err := manager.Install(snapshot, catalog.Skills)
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			require.Equal(t, "---\nname: alpha\n---\n# Install", readInstalledSkill(t, home, "alpha"))
+
+			for _, operation := range []string{"sync", "update"} {
+				content := "---\nname: alpha\n---\n# " + operation
+				writeFile(t, skillPath, content)
+				manager.Manifest, err = LoadManifest("")
+				require.NoError(t, err)
+
+				if operation == "sync" {
+					count, err = manager.Sync(source)
+				} else {
+					count, err = manager.Update(source)
+				}
+				require.NoError(t, err)
+				require.Equal(t, 1, count)
+				require.Equal(t, content, readInstalledSkill(t, home, "alpha"))
+			}
+		})
+	}
+}
