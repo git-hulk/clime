@@ -69,8 +69,10 @@ func init() {
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Manage AI agent skills from GitHub repositories or local paths",
-	Long: "Install skills from GitHub repositories or local paths into ~/.agents/skills. " +
-		"When ~/.claude exists, Claude Code gets symlinks in ~/.claude/skills.",
+	Long: "Install skills from GitHub repositories or local paths. Manifests under " +
+		"~/.clime install globally into ~/.agents/skills; other manifests install into " +
+		".agents/skills beside the manifest, with Claude Code symlinks in .claude/skills. " +
+		"Global installs add Claude Code symlinks only when ~/.claude exists.",
 	RunE: skillsListCmd.RunE,
 }
 
@@ -302,7 +304,7 @@ func newSkillsManager(manifest *skill.Manifest) (*skill.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets, err := skill.DetectTargets()
+	targets, err := manifest.DetectTargets()
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +684,7 @@ func uninstallByName(manifest *skill.Manifest, name string) error {
 	if _, exists := manifest.GetSkill(name); !exists {
 		return fmt.Errorf("skill %q is not installed", name)
 	}
-	targets, err := skill.DetectTargets()
+	targets, err := manifest.DetectTargets()
 	if err != nil {
 		return err
 	}

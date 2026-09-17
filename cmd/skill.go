@@ -31,7 +31,7 @@ var installSkillCmd = &cobra.Command{
 	Use:   "skill",
 	Short: "Install the clime-cli skill into ~/.agents/skills with a Claude symlink",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		targets, err := skill.Targets()
+		targets, err := skill.Targets("")
 		if err != nil {
 			return err
 		}

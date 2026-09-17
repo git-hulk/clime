@@ -51,7 +51,7 @@ func newTestManager(t *testing.T, manifest *Manifest) (*Manager, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
-	targets, err := DetectTargets()
+	targets, err := manifest.DetectTargets()
 	require.NoError(t, err)
 	return &Manager{
 		Manifest: manifest,

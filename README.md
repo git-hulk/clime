@@ -46,7 +46,9 @@ clime skills sync                # restore skills from the saved manifest
 clime skills uninstall my-skill
 ```
 
-Skills live in `~/.agents/skills/<name>/`, with links in `~/.claude/skills/` when `~/.claude` exists. Source repositories can store skills under `skills/`, `.agents/skills/`, or `.claude/skills/`, with a `SKILL.md` in each skill directory. Explicit catalog manifests take precedence; otherwise, clime uses the first directory containing skills in that order.
+Manifests under `~/.clime/` install skills globally into `~/.agents/skills/<name>/`, with links in `~/.claude/skills/` when `~/.claude` exists. Other manifests use project scope: `.agents/skills/<name>/` beside the manifest, with links in `.claude/skills/`. Project installs create both directories as needed. Install, update, sync, and uninstall all use this scope.
+
+Source repositories can store skills under `skills/`, `.agents/skills/`, or `.claude/skills/`, with a `SKILL.md` in each skill directory. Explicit catalog manifests take precedence; otherwise, clime uses the first directory containing skills in that order.
 
 To teach agents how to use clime, install its bundled skill with `clime install skill`.
 
