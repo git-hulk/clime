@@ -81,7 +81,7 @@ func Open(events Events) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets, err := DetectTargets()
+	targets, err := manifest.DetectTargets()
 	if err != nil {
 		return nil, err
 	}

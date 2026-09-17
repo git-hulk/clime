@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Target is a destination for installed skills: ~/.agents or ~/.claude.
+// Target is a global or project destination for installed skills.
 type Target struct {
 	Name string
 	Dir  string
@@ -18,30 +19,51 @@ var targetHomes = []struct{ name, dir string }{
 	{"claude", ".claude"},
 }
 
-// Targets returns every known target, whether or not its base directory
-// exists.
-func Targets() ([]Target, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+// Targets returns every known target under baseDir, whether or not it exists.
+// An empty baseDir defaults to the user's home directory.
+func Targets(baseDir string) ([]Target, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		}
 	}
 	targets := make([]Target, 0, len(targetHomes))
 	for _, target := range targetHomes {
-		targets = append(targets, Target{Name: target.name, Dir: filepath.Join(home, target.dir)})
+		targets = append(targets, Target{Name: target.name, Dir: filepath.Join(baseDir, target.dir)})
 	}
 	return targets, nil
 }
 
-// DetectTargets always includes the shared skills target, followed by agent
-// targets whose base directory exists.
-func DetectTargets() ([]Target, error) {
-	all, err := Targets()
+// DetectTargets uses global targets for manifests under ~/.clime, including
+// the shared target and agent targets whose base directory exists.
+// Other manifests include every target beside the manifest.
+func (manifest *Manifest) DetectTargets() ([]Target, error) {
+	baseDir := ""
+	if manifest.path != "" {
+		defaultPath, err := manifestPath()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine manifest path: %w", err)
+		}
+		path, err := filepath.Abs(manifest.path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve manifest path: %w", err)
+		}
+		globalDir := filepath.Dir(defaultPath)
+		manifestDir := filepath.Dir(path)
+		if manifestDir != globalDir && !strings.HasPrefix(manifestDir, globalDir+string(filepath.Separator)) {
+			baseDir = manifestDir
+		}
+	}
+
+	all, err := Targets(baseDir)
 	if err != nil {
 		return nil, err
 	}
 	var detected []Target
 	for _, target := range all {
-		if target.Name == "agents" || target.Exists() {
+		if baseDir != "" || target.Name == "agents" || target.Exists() {
 			detected = append(detected, target)
 		}
 	}

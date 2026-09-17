@@ -11,25 +11,36 @@ import (
 func TestDetectTargets(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	manifest := &Manifest{}
 
-	targets, err := DetectTargets()
+	targets, err := manifest.DetectTargets()
 	require.NoError(t, err)
 	require.Len(t, targets, 1)
 	require.Equal(t, "agents", targets[0].Name)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
-	targets, err = DetectTargets()
+	targets, err = manifest.DetectTargets()
 	require.NoError(t, err)
 	require.Len(t, targets, 2)
 	require.Equal(t, "agents", targets[0].Name)
 	require.Equal(t, "claude", targets[1].Name)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
-	targets, err = DetectTargets()
+	targets, err = manifest.DetectTargets()
 	require.NoError(t, err)
 	require.Len(t, targets, 2)
 	require.Equal(t, "agents", targets[0].Name)
 	require.Equal(t, "claude", targets[1].Name)
+
+	project := t.TempDir()
+	manifest, err = LoadManifest(filepath.Join(project, "skills.yaml"))
+	require.NoError(t, err)
+	targets, err = manifest.DetectTargets()
+	require.NoError(t, err)
+	require.Equal(t, []Target{
+		{Name: "agents", Dir: filepath.Join(project, ".agents")},
+		{Name: "claude", Dir: filepath.Join(project, ".claude")},
+	}, targets)
 }
 
 func TestTargetInstallAndRemove(t *testing.T) {
