@@ -31,10 +31,13 @@ type marketplaceFile struct {
 }
 
 type marketplacePlugin struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Source      string   `json:"source"`
-	Skills      []string `json:"skills"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Source is a relative path string, or an object such as
+	// {"source": "github", ...} or {"source": "archive", ...} for a plugin
+	// hosted outside the marketplace repository.
+	Source json.RawMessage `json:"source"`
+	Skills []string        `json:"skills"`
 }
 
 // pluginFile represents the .claude-plugin/plugin.json format.
@@ -120,7 +123,12 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 	var catalog Catalog
 	seen := make(map[string]bool)
 	for _, plugin := range marketplace.Plugins {
-		sourceDir := strings.TrimPrefix(plugin.Source, "./")
+		sourceDir, ok := plugin.localSourceDir()
+		if !ok {
+			// The plugin's files live outside this repository, so its skills
+			// are not part of the snapshot.
+			continue
+		}
 		if len(plugin.Skills) == 0 {
 			pluginCatalog, err := parsePluginManifest(filepath.Join(dir, sourceDir))
 			if err == nil {
@@ -149,6 +157,20 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 		}
 	}
 	return &catalog, nil
+}
+
+// localSourceDir returns the plugin's directory relative to the marketplace
+// root. It reports false when the source is not a relative path string,
+// such as a github, git-subdir, npm, or archive source object.
+func (plugin marketplacePlugin) localSourceDir() (string, bool) {
+	if len(plugin.Source) == 0 {
+		return "", true
+	}
+	var sourcePath string
+	if err := json.Unmarshal(plugin.Source, &sourcePath); err != nil {
+		return "", false
+	}
+	return strings.TrimPrefix(sourcePath, "./"), true
 }
 
 // parsePluginManifest reads .claude-plugin/plugin.json and discovers skills
