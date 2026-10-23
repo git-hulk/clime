@@ -115,6 +115,33 @@ func TestReadCatalogFromMarketplaceSkipsRemoteSources(t *testing.T) {
 	}, catalog.Skills)
 }
 
+func TestReadCatalogFromMarketplaceSkillRootedPlugins(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"), `{
+  "plugins": [
+    {"name": "alpha", "source": "./skills/alpha"},
+    {"name": "beta", "source": "./skills/cli/beta/"},
+    {"name": "no-skill", "source": "./skills/no-skill"},
+    {"name": "duplicate", "source": "./skills/alpha"}
+  ]
+}`)
+	writeFile(t, filepath.Join(dir, "skills", "alpha", ".claude-plugin", "plugin.json"),
+		`{"name": "alpha", "description": "Alpha plugin", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(dir, "skills", "alpha", "SKILL.md"), "---\nname: alpha\ndescription: Alpha\n---\n# Alpha")
+	writeFile(t, filepath.Join(dir, "skills", "cli", "beta", "SKILL.md"), "---\nname: beta\n---\n# Beta")
+	writeFile(t, filepath.Join(dir, "skills", "no-skill", "README.md"), "not a skill")
+	writeFile(t, filepath.Join(dir, "skills", "unlisted", "SKILL.md"), "# Unlisted")
+
+	catalog, err := ReadCatalog(dir)
+	require.NoError(t, err)
+	require.Equal(t, []Entry{
+		{Name: "alpha", Description: "Alpha", Path: filepath.Join("skills", "alpha")},
+		{Name: "beta", Path: filepath.Join("skills", "cli", "beta")},
+	}, catalog.Skills)
+}
+
 func TestReadCatalogPluginJSONFallbackFromEmptyMarketplace(t *testing.T) {
 	t.Parallel()
 

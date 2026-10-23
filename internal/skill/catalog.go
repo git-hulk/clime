@@ -131,7 +131,7 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 		}
 		if len(plugin.Skills) == 0 {
 			pluginCatalog, err := parsePluginManifest(filepath.Join(dir, sourceDir))
-			if err == nil {
+			if err == nil && len(pluginCatalog.Skills) > 0 {
 				for _, entry := range pluginCatalog.Skills {
 					entry.Path = filepath.Join(sourceDir, entry.Path)
 					if !seen[entry.Path] {
@@ -139,6 +139,16 @@ func parseMarketplaceManifest(dir string) (*Catalog, error) {
 						catalog.Skills = append(catalog.Skills, entry)
 					}
 				}
+				continue
+			}
+
+			// A plugin rooted at a skill directory: Claude Code loads the
+			// SKILL.md at the plugin root as the plugin's skill.
+			skillPath := filepath.Clean(sourceDir)
+			info, err := os.Stat(filepath.Join(dir, skillPath, "SKILL.md"))
+			if skillPath != "." && err == nil && info.Mode().IsRegular() && !seen[skillPath] {
+				seen[skillPath] = true
+				catalog.Skills = append(catalog.Skills, entryFromSkillDir(dir, skillPath))
 			}
 			continue
 		}
