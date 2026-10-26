@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	uicli "github.com/alperdrsnn/clime"
@@ -29,9 +30,10 @@ var initCmd = &cobra.Command{
 
 If a URL is provided, the plugin list is fetched from that remote YAML file and
 remembered for future runs.
-If a local file path is provided, the plugin list is loaded from that YAML file.
-Otherwise, the remembered URL is used, falling back to the built-in default
-plugin list when no URL has been recorded.`,
+If a local file path is provided, the plugin list is loaded from that YAML file
+and its absolute path is remembered for future runs.
+Otherwise, the remembered URL or path is used, falling back to the built-in
+default plugin list when no source has been recorded.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manifest, err := plugin.LoadManifest()
@@ -40,10 +42,14 @@ plugin list when no URL has been recorded.`,
 		}
 
 		source := manifest.InitURL
-		shouldRecord := false
 		if len(args) > 0 {
 			source = args[0]
-			shouldRecord = isURL(source)
+			if !isURL(source) {
+				source, err = filepath.Abs(source)
+				if err != nil {
+					return fmt.Errorf("failed to resolve init path: %w", err)
+				}
+			}
 		}
 
 		plugins, err := resolvePlugins(source)
@@ -51,10 +57,10 @@ plugin list when no URL has been recorded.`,
 			return err
 		}
 
-		if shouldRecord && source != manifest.InitURL {
+		if len(args) > 0 && source != manifest.InitURL {
 			manifest.InitURL = source
 			if err := manifest.Save(); err != nil {
-				return fmt.Errorf("failed to save init URL: %w", err)
+				return fmt.Errorf("failed to save init source: %w", err)
 			}
 		}
 
