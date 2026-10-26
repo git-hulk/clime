@@ -21,7 +21,7 @@ clime plugin install opencli --npm @jackwener/opencli
 clime opencli --help
 
 clime plugin list
-clime plugin update all
+clime plugin update all       # update installed plugins only
 clime plugin uninstall opencli
 ```
 
@@ -85,7 +85,10 @@ Bootstrap CLI plugins from a shared manifest:
 ```sh
 clime init                                 # saved source or built-in defaults
 clime init https://example.com/tools.yaml   # use and remember your team's manifest
+clime init ./tools.yaml                     # remember an absolute local path
 ```
+
+The URL or absolute path is saved as `init_url` in `~/.clime/plugins.yaml` and reused by `clime init` when no source is provided.
 
 Share a `skills.yaml` separately and apply it with `clime skills sync --manifest ./skills.yaml`.
 

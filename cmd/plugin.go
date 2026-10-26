@@ -434,7 +434,7 @@ var pluginUninstallCmd = &cobra.Command{
 var pluginUpdateCmd = &cobra.Command{
 	Use:   "update <name|all>",
 	Short: "Update an installed plugin",
-	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default git-hulk/clime-<name> convention. Use '*' or 'all' to update all managed plugins.",
+	Long:  "Updates a plugin from its configured source. GitHub-based plugins update to the latest release. Script-based plugins rerun their install script. Repo is resolved from --repo, manifest, or the default git-hulk/clime-<name> convention. Use '*' or 'all' to update all installed managed plugins.",
 	Args:  cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -521,13 +521,16 @@ func runPluginUpdateAll() error {
 		if name == "" || seen[name] {
 			continue
 		}
+		if _, installed := plugin.Find(name); !installed {
+			continue
+		}
 		seen[name] = true
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	if len(names) == 0 {
-		terminal.Warning("No managed plugins found.")
+		terminal.Warning("No installed managed plugins found.")
 		terminal.Info("Install a plugin with: clime plugin install <name>")
 		return nil
 	}
