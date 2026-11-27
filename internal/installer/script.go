@@ -39,39 +39,12 @@ func (installer *ScriptInstaller) Install(name string) (string, error) {
 		return "", fmt.Errorf("install script failed: %w", err)
 	}
 
-	binaryPath := installer.BinaryPath
-	if binaryPath != "" {
-		if strings.HasPrefix(binaryPath, "~/") {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			binaryPath = filepath.Join(home, binaryPath[2:])
-		}
-		if _, err := os.Stat(binaryPath); err != nil {
-			return "", fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
-		}
-	} else {
-		// Auto-detect binary on PATH by name
-		found, err := installer.lookPath(name)
-		if err != nil {
-			return "", fmt.Errorf("binary %q not found on PATH after install; use --binary-path to specify its location", name)
-		}
-		binaryPath = found
-	}
-
-	installDir, err := installer.pluginBinDir()
+	binaryPath, err := installer.resolveBinary(name)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(installDir, 0755); err != nil {
+	if err := installer.link(name, binaryPath); err != nil {
 		return "", err
-	}
-
-	linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
-	os.Remove(linkPath)
-	if err := os.Symlink(binaryPath, linkPath); err != nil {
-		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
 	version := installer.DetectVersion(name)
@@ -81,6 +54,15 @@ func (installer *ScriptInstaller) Install(name string) (string, error) {
 func (installer *ScriptInstaller) Update(name string, current plugin.ManifestEntry) (*UpdateResult, error) {
 	if err := installer.runScript(installer.ScriptURL); err != nil {
 		return nil, fmt.Errorf("failed to update plugin from script source %q: %w", installer.ScriptURL, err)
+	}
+
+	// Re-point the managed link at the binary the script just installed. Without this, a link that
+	// drifted (e.g. replaced by a plugin's self-upgrade) keeps reporting the old version forever.
+	// If the binary can't be located, keep the existing link as before.
+	if binaryPath, err := installer.resolveBinary(name); err == nil {
+		if err := installer.link(name, binaryPath); err != nil {
+			return nil, err
+		}
 	}
 
 	version := installer.DetectVersion(name)
@@ -108,6 +90,46 @@ func (installer *ScriptInstaller) Update(name string, current plugin.ManifestEnt
 
 func (installer *ScriptInstaller) Uninstall(name string, entry plugin.ManifestEntry) error {
 	return removePluginBinaryAndTarget(name)
+}
+
+// resolveBinary returns the binary the install script produced: BinaryPath if set, else name on PATH.
+func (installer *ScriptInstaller) resolveBinary(name string) (string, error) {
+	binaryPath := installer.BinaryPath
+	if binaryPath == "" {
+		found, err := installer.lookPath(name)
+		if err != nil {
+			return "", fmt.Errorf("binary %q not found on PATH after install; use --binary-path to specify its location", name)
+		}
+		return found, nil
+	}
+	if strings.HasPrefix(binaryPath, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		binaryPath = filepath.Join(home, binaryPath[2:])
+	}
+	if _, err := os.Stat(binaryPath); err != nil {
+		return "", fmt.Errorf("binary not found at %s after install: %w", binaryPath, err)
+	}
+	return binaryPath, nil
+}
+
+// link (re)creates the managed clime-<name> symlink pointing at binaryPath.
+func (installer *ScriptInstaller) link(name, binaryPath string) error {
+	installDir, err := installer.pluginBinDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return err
+	}
+	linkPath := filepath.Join(installDir, plugin.BinPrefix+name)
+	os.Remove(linkPath)
+	if err := os.Symlink(binaryPath, linkPath); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+	return nil
 }
 
 func (installer *ScriptInstaller) DetectVersion(name string) string {
