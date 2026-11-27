@@ -94,6 +94,9 @@ func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
 		runVersion: func(binPath string) (string, error) {
 			return "", nil
 		},
+		lookPath: func(name string) (string, error) {
+			return "", fmt.Errorf("not found")
+		},
 	}
 
 	entry := plugin.ManifestEntry{
@@ -105,6 +108,41 @@ func TestScriptInstallerUpdateFallsBackToLatest(t *testing.T) {
 	result, err := s.Update("tool", entry)
 	require.NoError(t, err)
 	require.Equal(t, plugin.VersionLatest, result.LatestVersion)
+}
+
+// A managed link that no longer points at binary_path (e.g. a plugin's self-upgrade renamed a new
+// binary over it) must be re-pointed on update, or the stale copy's version is reported as current.
+func TestScriptInstallerUpdateRelinksDriftedSymlink(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pluginsDir, err := plugin.PluginBinDir()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+
+	writeCLI := func(path, version string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\necho "+version+"\n"), 0o755))
+	}
+	stale := filepath.Join(os.Getenv("HOME"), "old", "tool")
+	writeCLI(stale, "v1.0.0")
+	linkPath := filepath.Join(pluginsDir, plugin.BinPrefix+"tool")
+	require.NoError(t, os.Symlink(stale, linkPath))
+
+	installed := filepath.Join(os.Getenv("HOME"), ".local", "bin", "tool")
+	s := NewScriptInstaller("https://example.com/install.sh", "~/.local/bin/tool")
+	s.runScript = func(string) error { writeCLI(installed, "v2.0.0"); return nil }
+
+	result, err := s.Update("tool", plugin.ManifestEntry{
+		Name:    "tool",
+		Version: "1.0.0",
+		Type:    plugin.SourceTypeScript,
+		Source:  "https://example.com/install.sh",
+	})
+	require.NoError(t, err)
+	require.True(t, result.Updated)
+	require.Equal(t, "2.0.0", result.LatestVersion)
+	target, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	require.Equal(t, installed, target)
 }
 
 func TestScriptInstallerInstallAutoDetectBinary(t *testing.T) {

@@ -117,7 +117,7 @@ plugin list when no URL has been recorded.`,
 				return
 			}
 
-			manifest.Add(pluginConfig.Name, version, pluginInstaller.PluginType(), pluginInstaller.Source(), "")
+			manifest.Add(pluginConfig.Name, version, pluginInstaller.PluginType(), pluginInstaller.Source(), pluginConfig.BinaryPath)
 			if pluginConfig.Description != "" {
 				manifest.SetDescription(pluginConfig.Name, pluginConfig.Description)
 			}
